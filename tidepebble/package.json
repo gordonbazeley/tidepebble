@@ -1,0 +1,36 @@
+{
+  "name": "TidePebble",
+  "author": "ModusApps",
+  "version": "0.1.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "TidePebble",
+    "uuid": "36fecabf-c78d-4ffb-a892-081d60796638",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite",
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": false,
+      "configurable": true
+    },
+    "messageKeys": [
+      "tide_location",
+      "tide_status",
+      "tide_current_minutes",
+      "tide_values",
+      "tide_times"
+    ],
+    "capabilities": ["configurable", "location"],
+    "resources": {
+      "media": []
+    }
+  }
+}

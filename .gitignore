@@ -1,0 +1,8 @@
+build/
+**/build/
+.lock-waf_*
+**/.lock-waf_*
+.claude/
+**/.claude/
+.tmp/
+**/.tmp/
