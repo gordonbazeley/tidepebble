@@ -203,7 +203,8 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
     max_value += 1;
   }
 
-  const int16_t left = 48;
+  const int16_t left = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+    48, 48, 48, 48, 60, 60, 60);
   const int16_t top = 2;
   const int16_t width = bounds.size.w - left - 6;
   const int16_t height = bounds.size.h - 4;
@@ -211,10 +212,13 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
   char min_label[12];
   prv_format_height(max_label, sizeof(max_label), max_value);
   prv_format_height(min_label, sizeof(min_label), min_value);
-  graphics_draw_text(ctx, max_label, fonts_get_system_font(FONT_KEY_GOTHIC_18),
-    GRect(0, top - 5, left - 3, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
-  graphics_draw_text(ctx, min_label, fonts_get_system_font(FONT_KEY_GOTHIC_18),
-    GRect(0, top + height - 17, left - 3, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+  GFont axis_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+    FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18,
+    FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD));
+  graphics_draw_text(ctx, max_label, axis_font,
+    GRect(0, top - 7, left - 3, 28), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+  graphics_draw_text(ctx, min_label, axis_font,
+    GRect(0, top + height - 22, left - 3, 28), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
 
   graphics_context_set_stroke_color(ctx, GColorLightGray);
   for (int16_t i = 0; i <= 2; i += 1) {
@@ -256,9 +260,11 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
       ((s_tide_values[i] - min_value) * height / (max_value - min_value));
     graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorBlue, GColorBlack));
     graphics_fill_circle(ctx, GPoint(x, y), 2);
-    const int16_t label_width = 50;
-    const int16_t label_height = 23;
-    const int16_t vertical_offsets[] = { -12, -35, 12, -58, 35 };
+    const int16_t label_width = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+      50, 50, 50, 50, 62, 62, 62);
+    const int16_t label_height = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+      23, 23, 23, 23, 29, 29, 29);
+    const int16_t vertical_offsets[] = { -14, -43, 14, -72, 43 };
     GRect label_rect = GRect(0, 0, label_width, label_height);
     bool positioned = false;
     for (int16_t side = 0; side < 2 && !positioned; side += 1) {
@@ -286,7 +292,11 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
     graphics_context_set_fill_color(ctx, prv_label_background_color());
     graphics_fill_rect(ctx, label_rect, 0, GCornerNone);
     graphics_context_set_text_color(ctx, GColorBlack);
-    graphics_draw_text(ctx, s_tide_times[i], fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+    GFont event_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+      FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
+      FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
+      FONT_KEY_GOTHIC_24_BOLD));
+    graphics_draw_text(ctx, s_tide_times[i], event_font,
       GRect(label_rect.origin.x, label_rect.origin.y - 1, label_width, label_height + 1),
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentCenter, NULL);
@@ -311,10 +321,16 @@ static void prv_window_load(Window *window) {
   Layer *root = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(root);
   int16_t chart_bottom = bounds.size.h;
+  int16_t header_height = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+    28, 28, 28, 28, 34, 34, 34);
+  GFont header_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
+    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
+    FONT_KEY_GOTHIC_24_BOLD));
 
-  s_time_layer = prv_text_layer(GRect(2, 0, bounds.size.w - 4, 28),
-    fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GTextAlignmentCenter);
-  s_chart_layer = layer_create(GRect(0, 28, bounds.size.w, chart_bottom - 28));
+  s_time_layer = prv_text_layer(GRect(2, 0, bounds.size.w - 4, header_height),
+    header_font, GTextAlignmentCenter);
+  s_chart_layer = layer_create(GRect(0, header_height, bounds.size.w, chart_bottom - header_height));
   layer_set_update_proc(s_chart_layer, prv_draw_chart);
   s_status_layer = prv_text_layer(GRect(5, chart_bottom, bounds.size.w - 10, 0),
     fonts_get_system_font(FONT_KEY_GOTHIC_14), GTextAlignmentCenter);
