@@ -14,12 +14,30 @@ static Layer *s_chart_layer;
 static TextLayer *s_time_layer;
 static TextLayer *s_status_layer;
 static int16_t s_tide_values[TIDE_POINT_COUNT];
-static char s_tide_times[TIDE_POINT_COUNT][6];
 static int16_t s_tide_count;
 static int16_t s_current_minutes;
 static char s_location[LOCATION_MAX_LEN] = "Finding nearest tide data";
 static char s_status[STATUS_MAX_LEN] = "Waiting for phone location...";
 static char s_header[LOCATION_MAX_LEN + 8] = "";
+
+static int8_t prv_tide_value_digit(char value) {
+  if (value >= 'A' && value <= 'Z') {
+    return value - 'A';
+  }
+  if (value >= 'a' && value <= 'z') {
+    return value - 'a' + 26;
+  }
+  if (value >= '0' && value <= '9') {
+    return value - '0' + 52;
+  }
+  if (value == '-') {
+    return 62;
+  }
+  if (value == '_') {
+    return 63;
+  }
+  return -1;
+}
 
 static void prv_set_text(void) {
   time_t now = time(NULL);
@@ -30,48 +48,21 @@ static void prv_set_text(void) {
   text_layer_set_text(s_status_layer, s_status);
 }
 
-static int16_t prv_parse_values(const char *csv) {
+static int16_t prv_parse_values(const char *csv, int16_t offset) {
   int16_t count = 0;
-  const char *cursor = csv;
-  while (*cursor && count < TIDE_POINT_COUNT) {
-    bool negative = false;
-    int16_t value = 0;
-    if (*cursor == '-') {
-      negative = true;
-      cursor += 1;
+  size_t length = strlen(csv);
+  for (size_t chunk_offset = 0; chunk_offset + 1 < length && count < TIDE_POINT_COUNT; chunk_offset += 2) {
+    int8_t high = prv_tide_value_digit(csv[chunk_offset]);
+    int8_t low = prv_tide_value_digit(csv[chunk_offset + 1]);
+    if (high < 0 || low < 0) {
+      continue;
     }
-    while (*cursor >= '0' && *cursor <= '9') {
-      value = value * 10 + (*cursor - '0');
-      cursor += 1;
-    }
-    s_tide_values[count++] = negative ? -value : value;
-    while (*cursor && *cursor != ',') {
-      cursor += 1;
-    }
-    if (*cursor == ',') {
-      cursor += 1;
-    }
-  }
-  return count;
-}
-
-static void prv_parse_times(const char *csv) {
-  int16_t count = 0;
-  const char *cursor = csv;
-  memset(s_tide_times, 0, sizeof(s_tide_times));
-  while (*cursor && count < TIDE_POINT_COUNT) {
-    int16_t character = 0;
-    while (*cursor && *cursor != ',') {
-      if (character < (int16_t)sizeof(s_tide_times[count]) - 1) {
-        s_tide_times[count][character++] = *cursor;
-      }
-      cursor += 1;
+    if (offset + count < TIDE_POINT_COUNT) {
+      s_tide_values[offset + count] = ((high << 6) | low) - 2048;
     }
     count += 1;
-    if (*cursor == ',') {
-      cursor += 1;
-    }
   }
+  return count;
 }
 
 static bool prv_is_tide_event(int16_t index, bool high) {
@@ -129,6 +120,14 @@ static void prv_format_height(char *buffer, size_t buffer_size, int16_t value) {
     value < 0 ? "-" : "", abs(value) / 100, abs(value) % 100);
 }
 
+static void prv_format_time_for_index(char *buffer, size_t buffer_size, int16_t index) {
+  time_t now = time(NULL);
+  time_t base_time = now - ((time_t)s_current_minutes * 60);
+  time_t sample_time = base_time + ((time_t)index * 60 * 60);
+  struct tm *sample_tm = localtime(&sample_time);
+  strftime(buffer, buffer_size, "%H:%M", sample_tm);
+}
+
 static bool prv_rects_overlap(GRect first, GRect second) {
   return first.origin.x < second.origin.x + second.size.w &&
     first.origin.x + first.size.w > second.origin.x &&
@@ -136,19 +135,11 @@ static bool prv_rects_overlap(GRect first, GRect second) {
     first.origin.y + first.size.h > second.origin.y;
 }
 
-static GColor prv_label_background_color(void) {
-#ifdef PBL_COLOR
-  return (GColor) { .argb = 0x7f };
-#else
-  return GColorWhite;
-#endif
-}
-
 static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
   Tuple *location = dict_find(iterator, MESSAGE_KEY_tide_location);
   Tuple *status = dict_find(iterator, MESSAGE_KEY_tide_status);
+  Tuple *sample_offset = dict_find(iterator, MESSAGE_KEY_tide_sample_offset);
   Tuple *values = dict_find(iterator, MESSAGE_KEY_tide_values);
-  Tuple *times = dict_find(iterator, MESSAGE_KEY_tide_times);
   Tuple *current_minutes = dict_find(iterator, MESSAGE_KEY_tide_current_minutes);
 
   if (location) {
@@ -159,17 +150,18 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
     strncpy(s_status, status->value->cstring, sizeof(s_status) - 1);
     s_status[sizeof(s_status) - 1] = '\0';
   }
+  int16_t offset = 0;
+  if (sample_offset) {
+    offset = sample_offset->value->int16;
+  }
   if (values) {
     char value_csv[160];
     strncpy(value_csv, values->value->cstring, sizeof(value_csv) - 1);
     value_csv[sizeof(value_csv) - 1] = '\0';
-    s_tide_count = prv_parse_values(value_csv);
-  }
-  if (times) {
-    char time_csv[160];
-    strncpy(time_csv, times->value->cstring, sizeof(time_csv) - 1);
-    time_csv[sizeof(time_csv) - 1] = '\0';
-    prv_parse_times(time_csv);
+    int16_t parsed = prv_parse_values(value_csv, offset);
+    if (offset + parsed > s_tide_count) {
+      s_tide_count = offset + parsed;
+    }
   }
   if (current_minutes) {
     s_current_minutes = current_minutes->value->int16;
@@ -182,7 +174,7 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
 static void prv_draw_chart(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorDarkGray, GColorBlack));
 
   if (s_tide_count < 2) {
     graphics_draw_rect(ctx, GRect(8, 12, bounds.size.w - 16, bounds.size.h - 24));
@@ -203,22 +195,28 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
     max_value += 1;
   }
 
-  const int16_t left = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-    48, 48, 48, 48, 60, 60, 60);
-  const int16_t top = 2;
-  const int16_t width = bounds.size.w - left - 6;
-  const int16_t height = bounds.size.h - 4;
+  const int16_t margin = 4;
+  const int16_t left = margin;
+  const int16_t top = margin;
+  const int16_t width = bounds.size.w - (margin * 2);
+  const int16_t height = bounds.size.h - (margin * 2);
   char max_label[12];
   char min_label[12];
   prv_format_height(max_label, sizeof(max_label), max_value);
   prv_format_height(min_label, sizeof(min_label), min_value);
   GFont axis_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18,
-    FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD));
+    FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18));
+  graphics_context_set_text_color(ctx, GColorBlack);
   graphics_draw_text(ctx, max_label, axis_font,
-    GRect(0, top - 7, left - 3, 28), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    GRect(left, top - 1, 56, 18),
+    GTextOverflowModeTrailingEllipsis,
+    GTextAlignmentLeft, NULL);
   graphics_draw_text(ctx, min_label, axis_font,
-    GRect(0, top + height - 22, left - 3, 28), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    GRect(left, top + height - 17, 56, 18),
+    GTextOverflowModeTrailingEllipsis,
+    GTextAlignmentLeft, NULL);
+  graphics_context_set_text_color(ctx, GColorBlack);
 
   graphics_context_set_stroke_color(ctx, GColorLightGray);
   for (int16_t i = 0; i <= 2; i += 1) {
@@ -289,14 +287,14 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
       }
     }
     label_rects[event] = label_rect;
-    graphics_context_set_fill_color(ctx, prv_label_background_color());
-    graphics_fill_rect(ctx, label_rect, 0, GCornerNone);
     graphics_context_set_text_color(ctx, GColorBlack);
     GFont event_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
       FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
       FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
       FONT_KEY_GOTHIC_24_BOLD));
-    graphics_draw_text(ctx, s_tide_times[i], event_font,
+    char event_time[6];
+    prv_format_time_for_index(event_time, sizeof(event_time), i);
+    graphics_draw_text(ctx, event_time, event_font,
       GRect(label_rect.origin.x, label_rect.origin.y - 1, label_width, label_height + 1),
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentCenter, NULL);

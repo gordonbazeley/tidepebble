@@ -25,6 +25,7 @@
       "tide_location",
       "tide_status",
       "tide_current_minutes",
+      "tide_sample_offset",
       "tide_values",
       "tide_times"
     ],
