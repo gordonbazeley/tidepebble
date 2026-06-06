@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
 
 unset PYTHONPATH
 unset PYTHONHOME
@@ -33,11 +34,11 @@ reset_emulator_state() {
   pkill -f "pebble install --emulator emery" 2>/dev/null || true
   sleep 2
 
-  local emery_dir="$HOME/Library/Application Support/Pebble SDK/4.9.169/emery"
-  local flash="$emery_dir/qemu_spi_flash.bin"
-  if [[ -f "$flash" ]]; then
+  local sdk_root="$HOME/Library/Application Support/Pebble SDK"
+  local flash
+  while IFS= read -r flash; do
     mv "$flash" "$flash.bak-$(date +%Y%m%d-%H%M%S)"
-  fi
+  done < <(find "$sdk_root" -path "*/emery/qemu_spi_flash.bin" -print 2>/dev/null)
 }
 
 pebble clean
@@ -51,15 +52,5 @@ if ! install_with_timeout 45; then
   install_with_timeout 60
 fi
 
-pebble emu-app-config --emulator emery &
-config_pid=$!
-for _ in {1..10}; do
-  if ! kill -0 "$config_pid" 2>/dev/null; then
-    wait "$config_pid"
-    exit $?
-  fi
-  sleep 1
-done
-
-echo "App installed. Config browser did not finish opening; leaving emulator running."
-kill "$config_pid" 2>/dev/null || true
+echo "App installed. Opening config in Brave..."
+node "$SCRIPT_DIR/open_config.js" &
