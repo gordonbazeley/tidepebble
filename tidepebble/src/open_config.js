@@ -93,14 +93,12 @@ function persistSettings() {
 }
 
 function refreshWatch() {
-  var key = MSG_KEY_INDEX.tide_status;
-  if (key === undefined) return;
-  var args = ['send-app-message', '--emulator', 'emery', '--string', key + '=Refreshing tide data...'];
+  // Reinstall so pkjs restarts and loads the new location from localStorage.
   try {
-    child_process.execFileSync('pebble', args, { cwd: PROJECT_ROOT, timeout: 5000 });
-    console.log('Watch refresh requested.');
+    child_process.execFileSync('pebble', ['install', '--emulator', 'emery'], { cwd: PROJECT_ROOT, timeout: 30000 });
+    console.log('App reinstalled; pkjs reloading with new settings.');
   } catch (e) {
-    console.warn('Watch refresh failed (selection saved for next launch):', e.message.slice(0, 120));
+    console.warn('Reinstall failed — new settings will apply on next launch:', e.message.slice(0, 120));
   }
 }
 
