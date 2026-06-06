@@ -15,6 +15,7 @@ var MSG_KEY_INDEX = {};
 
 var SELECTED_LOCATION_KEY = 'tide_selected_location_v1';
 var APP_UUID = pkg.pebble.uuid;
+var PROJECT_ROOT = path.resolve(__dirname, '..');
 
 function findLocalStorageFile() {
   var candidates = [
@@ -106,8 +107,13 @@ if (!capturedUrl) {
 var html;
 if (capturedUrl.indexOf('base64,') !== -1) {
   html = Buffer.from(capturedUrl.split('base64,')[1], 'base64').toString('utf8');
-} else if (capturedUrl.startsWith('data:text/html,')) {
-  html = decodeURIComponent(capturedUrl.slice('data:text/html,'.length));
+} else if (capturedUrl.startsWith('data:text/html')) {
+  var commaIndex = capturedUrl.indexOf(',');
+  if (commaIndex === -1) {
+    console.error('Unexpected config URL format:', capturedUrl.slice(0, 60));
+    process.exit(1);
+  }
+  html = decodeURIComponent(capturedUrl.slice(commaIndex + 1));
 } else {
   console.error('Unexpected config URL format:', capturedUrl.slice(0, 40));
   process.exit(1);
@@ -134,7 +140,7 @@ function refreshWatch() {
   }
   var args = ['send-app-message', '--emulator', 'emery', '--string', key + '=Refreshing tide data...'];
   try {
-    child_process.execFileSync('pebble', args, { timeout: 5000 });
+    child_process.execFileSync('pebble', args, { cwd: PROJECT_ROOT, timeout: 5000 });
     console.log('Watch refresh requested.');
   } catch (e) {
     console.warn('Watch refresh failed (selection saved for next launch):', e.message.slice(0, 120));
@@ -191,6 +197,11 @@ var server = http.createServer(function(req, res) {
   // Serve config HTML for all other paths; the page reads ?return_to from location.search.
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
+});
+
+server.on('error', function(error) {
+  console.error('Could not start config server:', error.message);
+  process.exit(1);
 });
 
 server.listen(0, '127.0.0.1', function() {
