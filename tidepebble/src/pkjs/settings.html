@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>TidePebble · Settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --navy: #0c2c49;
+    --navy-2: #0f3a5f;
+    --tide: #1466c4;
+    --teal: #0a9ab2;
+    --teal-ink: #07788c;
+    --ink: #14222e;
+    --gray: #5d6e7b;
+    --faint: #8b9aa6;
+    --line: #e2e8ed;
+    --line-2: #eef2f5;
+    --bg: #eef2f6;
+    --card: #ffffff;
+    --link: #0e63c0;
+    --ok: #1a9d4d;
+    --r: 16px;
+    --r-sm: 11px;
+    --pad: clamp(16px, 5vw, 22px);
+    --maxw: 560px;
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --shadow: 0 1px 2px rgba(16,40,60,.06), 0 6px 20px -12px rgba(16,40,60,.22);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100dvh;
+  }
+  .app { max-width: var(--maxw); margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg); }
+
+  /* header */
+  .hd {
+    position: relative;
+    background: linear-gradient(150deg, var(--navy) 0%, var(--navy-2) 46%, var(--teal-ink) 116%);
+    color: #fff;
+    padding: calc(var(--sat) + 14px) var(--pad) 0;
+    overflow: hidden;
+  }
+  .hd-row { display: flex; align-items: center; gap: 12px; min-height: 38px; }
+  .back {
+    flex: 0 0 auto; width: 38px; height: 38px; margin-left: -8px;
+    display: grid; place-items: center; border: 0; background: transparent; color: #fff;
+    border-radius: 50%; cursor: pointer; transition: background .2s;
+  }
+  .back:active { background: rgba(255,255,255,.16); }
+  .brandmark { display: flex; align-items: center; gap: 9px; }
+  .brandmark .pin { width: 17px; height: 17px; opacity: .9; }
+  .wordmark {
+    font-family: "Oswald", sans-serif; font-weight: 600; letter-spacing: .4px;
+    font-size: clamp(19px, 5.6vw, 23px); line-height: 1;
+  }
+  .wordmark b { color: #7fd8e6; font-weight: 600; }
+  .hd-sub { font-size: 12.5px; letter-spacing: .3px; color: #aacbe0; margin: 16px 0 0; text-transform: uppercase; font-weight: 600; }
+  .hd-title { font-size: clamp(23px, 7vw, 30px); font-weight: 700; letter-spacing: -.4px; margin: 3px 0 0; }
+  .hd-desc { font-size: 14px; color: #cfe1ee; margin: 7px 0 0; max-width: 40ch; }
+  .wave { display: block; width: 100%; height: 22px; margin-top: 14px; }
+
+  /* body */
+  .body {
+    flex: 1 1 auto;
+    padding: clamp(16px, 4.5vw, 22px) var(--pad) 26px;
+    display: flex; flex-direction: column; gap: clamp(14px, 3.6vw, 18px);
+  }
+  .seclabel { font-size: 11.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--faint); margin: 0 0 9px 3px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); overflow: hidden; }
+  .card > .pad { padding: clamp(15px, 4.2vw, 19px); }
+  .divide { height: 1px; background: var(--line-2); }
+
+  /* location row */
+  .loc { display: flex; align-items: center; gap: 13px; }
+  .loc .ico {
+    flex: 0 0 auto; width: 42px; height: 42px; border-radius: 12px;
+    display: grid; place-items: center;
+    background: linear-gradient(150deg, #eaf6f9, #dceef3); color: var(--teal-ink);
+  }
+  .loc .ico svg { width: 22px; height: 22px; }
+  .loc .meta { flex: 1 1 auto; min-width: 0; }
+  .loc .k { font-size: 12.5px; color: var(--gray); }
+  .loc .v { font-size: clamp(17px, 4.8vw, 19px); font-weight: 700; letter-spacing: -.2px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chip { flex: 0 0 auto; font-size: 11.5px; font-weight: 700; letter-spacing: .4px; padding: 5px 10px; border-radius: 999px; white-space: nowrap; }
+  .chip.gps { background: #e7f6ec; color: #157f3c; }
+  .chip.manual { background: #e9f1fb; color: #1a5fb4; }
+
+  /* segmented control */
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: #eef2f5; border-radius: 12px; padding: 4px; margin-top: 15px; }
+  .seg button {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    font: inherit; font-size: 14.5px; font-weight: 600; color: var(--gray);
+    padding: 10px 8px; border-radius: 9px; line-height: 1.2;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    transition: color .18s;
+  }
+  .seg button svg { width: 16px; height: 16px; }
+  .seg button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(16,40,60,.14), 0 2px 8px -4px rgba(16,40,60,.2); }
+
+  /* search */
+  .manualwrap { margin-top: 15px; }
+  .manualwrap[hidden] { display: none; }
+  .hint { font-size: 13.5px; color: var(--gray); margin: 0 0 11px; }
+  .searchrow { display: flex; gap: 9px; }
+  .field { flex: 1 1 auto; min-width: 0; position: relative; }
+  .field svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--faint); pointer-events: none; }
+  .field input {
+    width: 100%; font: inherit; font-size: 16px; color: var(--ink);
+    padding: 13px 13px 13px 40px; border: 1.5px solid var(--line); border-radius: var(--r-sm);
+    background: #fff; transition: border-color .18s, box-shadow .18s;
+  }
+  .field input::placeholder { color: var(--faint); }
+  .field input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(10,154,178,.16); }
+  .btn {
+    flex: 0 0 auto; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+    padding: 0 18px; border-radius: var(--r-sm); border: 0; color: #fff;
+    background: linear-gradient(160deg, var(--teal), var(--teal-ink));
+    box-shadow: 0 2px 10px -4px rgba(10,154,178,.7);
+    transition: filter .18s, transform .05s;
+  }
+  .btn:active { transform: translateY(1px); filter: brightness(.96); }
+  .btn[disabled] { opacity: .5; pointer-events: none; }
+
+  /* results */
+  .results { list-style: none; margin: 13px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+  .results[hidden] { display: none; }
+  .result {
+    display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+    font: inherit; cursor: pointer; padding: 11px 12px; border-radius: var(--r-sm);
+    border: 1.5px solid var(--line); background: #fff; transition: border-color .15s, background .15s;
+  }
+  .result:active { background: #f5fafb; }
+  .result[aria-current="true"] { border-color: var(--teal); background: #f1fafc; }
+  .result .rico { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 8px; background: #eef3f7; display: grid; place-items: center; color: var(--teal-ink); }
+  .result .rico svg { width: 16px; height: 16px; }
+  .result .rmeta { flex: 1 1 auto; min-width: 0; }
+  .result .rname { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result .rsub { font-size: 12.5px; color: var(--gray); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result .rtick { flex: 0 0 auto; width: 20px; height: 20px; color: var(--teal); opacity: 0; }
+  .result[aria-current="true"] .rtick { opacity: 1; }
+  .empty { font-size: 13.5px; color: var(--faint); margin: 12px 2px 0; }
+
+  /* display settings rows */
+  .row { display: flex; align-items: center; gap: 14px; padding: clamp(14px,4vw,17px) clamp(15px,4.2vw,19px); }
+  .row .rl { flex: 1 1 auto; min-width: 0; }
+  .row .rt { font-size: 15.5px; font-weight: 600; }
+  .row .rd { font-size: 12.5px; color: var(--gray); margin-top: 2px; }
+  .miniseg { flex: 0 0 auto; display: inline-grid; grid-auto-flow: column; gap: 3px; background: #eef2f5; border-radius: 10px; padding: 3px; }
+  .miniseg button {
+    appearance: none; border: 0; background: transparent; font: inherit; cursor: pointer;
+    font-size: 13.5px; font-weight: 600; color: var(--gray); padding: 7px 13px; border-radius: 8px;
+  }
+  .miniseg button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(16,40,60,.16); }
+
+  /* sources */
+  .sources { font-size: 13px; color: var(--gray); line-height: 1.6; padding: 0 4px; }
+  .sources a { color: var(--link); text-decoration: none; font-weight: 600; }
+  .sources a:active { text-decoration: underline; }
+  .sources .srow { display: flex; gap: 8px; }
+  .sources .srow + .srow { margin-top: 6px; }
+  .sources .sk { color: var(--faint); flex: 0 0 auto; }
+
+  /* sticky save bar */
+  .savebar {
+    position: sticky; bottom: 0; z-index: 5;
+    padding: 12px var(--pad) calc(12px + var(--sab));
+    background: linear-gradient(to top, var(--bg) 62%, rgba(238,242,246,0));
+  }
+  .save {
+    width: 100%; font: inherit; font-size: 16.5px; font-weight: 700; letter-spacing: .2px;
+    color: #fff; border: 0; border-radius: 13px; padding: 15px; cursor: pointer;
+    background: linear-gradient(160deg, #105e9e, var(--navy));
+    box-shadow: 0 6px 18px -7px rgba(12,44,73,.7); transition: transform .05s, filter .18s;
+  }
+  .save:active { transform: translateY(1px); filter: brightness(1.05); }
+
+  /* toast */
+  .toast {
+    position: fixed; left: 50%; bottom: calc(86px + var(--sab));
+    transform: translateX(-50%) translateY(14px);
+    background: var(--ink); color: #fff; font-size: 14px; font-weight: 600;
+    padding: 11px 18px; border-radius: 999px; box-shadow: 0 10px 30px -8px rgba(0,0,0,.4);
+    opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; z-index: 20;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast svg { width: 17px; height: 17px; color: #5fe08a; }
+
+  @media (min-width: 620px) {
+    .app { margin: 22px auto; min-height: auto; border-radius: 26px; overflow: hidden; box-shadow: 0 30px 70px -30px rgba(12,44,73,.5); }
+    .hd { padding-top: 22px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="hd">
+    <div class="hd-row">
+      <button class="back" aria-label="Back" onclick="history.length>1?history.back():null">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="brandmark">
+        <svg class="pin" viewBox="0 0 24 24" fill="none" stroke="#7fd8e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.6-7-11a7 7 0 0 1 14 0c0 5.4-7 11-7 11Z"/><circle cx="12" cy="10" r="2.4"/></svg>
+        <span class="wordmark">Tide<b>Pebble</b></span>
+      </div>
+    </div>
+    <p class="hd-sub">Watch settings</p>
+    <h1 class="hd-title">Location &amp; display</h1>
+    <p class="hd-desc">Choose where TidePebble reads tides for, and how they appear on your watch.</p>
+    <svg class="wave" viewBox="0 0 560 22" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 12 C 70 2, 140 2, 210 12 S 350 22, 420 12 S 560 2, 630 12 L 630 22 L 0 22 Z" fill="var(--bg)"/>
+    </svg>
+  </header>
+
+  <main class="body">
+    <section>
+      <p class="seclabel">Location</p>
+      <div class="card">
+        <div class="pad">
+          <div class="loc">
+            <span class="ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.6-7-11a7 7 0 0 1 14 0c0 5.4-7 11-7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg>
+            </span>
+            <div class="meta">
+              <div class="k">Current location</div>
+              <div class="v" id="locValue">Phone GPS</div>
+            </div>
+            <span class="chip gps" id="locChip">Phone GPS</span>
+          </div>
+
+          <div class="seg" role="tablist" aria-label="Location source">
+            <button role="tab" id="tabGps" aria-selected="true" onclick="setMode('gps')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>
+              Phone GPS
+            </button>
+            <button role="tab" id="tabManual" aria-selected="false" onclick="setMode('manual')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.6-7-11a7 7 0 0 1 14 0c0 5.4-7 11-7 11Z"/><circle cx="12" cy="10" r="2.4"/></svg>
+              Set manually
+            </button>
+          </div>
+
+          <div class="manualwrap" id="manualWrap" hidden>
+            <p class="hint">Search for a coastal place to override phone GPS.</p>
+            <form class="searchrow" id="searchForm" onsubmit="return doSearch(event)">
+              <label class="field">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+                <input id="q" type="search" inputmode="search" autocomplete="off" placeholder="Location name…" aria-label="Location name" />
+              </label>
+              <button class="btn" type="submit" id="searchBtn">Search</button>
+            </form>
+            <ul class="results" id="results" hidden></ul>
+            <p class="empty" id="empty" hidden>No matches — try a nearby town or port.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <p class="seclabel">Watch display</p>
+      <div class="card">
+        <div class="row">
+          <div class="rl">
+            <div class="rt">Tide height units</div>
+            <div class="rd">How depths show on the watch face</div>
+          </div>
+          <div class="miniseg" role="tablist" aria-label="Units">
+            <button role="tab" aria-selected="true" onclick="pick(this,'units','m')">Metres</button>
+            <button role="tab" aria-selected="false" onclick="pick(this,'units','ft')">Feet</button>
+          </div>
+        </div>
+        <div class="divide"></div>
+        <div class="row">
+          <div class="rl">
+            <div class="rt">Clock format</div>
+            <div class="rd">Tide times on the watch</div>
+          </div>
+          <div class="miniseg" role="tablist" aria-label="Clock format">
+            <button role="tab" aria-selected="true" onclick="pick(this,'clock','24')">24h</button>
+            <button role="tab" aria-selected="false" onclick="pick(this,'clock','12')">12h</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <p class="seclabel">Data sources</p>
+      <div class="card">
+        <div class="pad">
+          <div class="sources">
+            <div class="srow"><span class="sk">Tides</span><span><a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> marine data, sourced from DWD.</span></div>
+            <div class="srow"><span class="sk">Places</span><span><a href="https://www.bigdatacloud.com" target="_blank" rel="noopener">BigDataCloud</a> reverse geocoding.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="savebar">
+    <button class="save" onclick="save()">Save settings</button>
+  </div>
+</div>
+
+<div class="toast" id="toast">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+  <span id="toastMsg">Settings saved</span>
+</div>
+
+<script>
+  // ---- URL query helper ----
+  function getQuery(key) {
+    try {
+      return new URLSearchParams(window.location.search).get(key);
+    } catch(e) {
+      var m = window.location.search.match(new RegExp('[?&]' + key + '=([^&]*)'));
+      return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : null;
+    }
+  }
+
+  // ---- state (injected by showConfiguration, then overridden by URL params) ----
+  /*STATE_INIT*/
+  if (typeof injected === 'undefined') {
+    var injected = null;
+  }
+  var state = Object.assign({ mode: 'gps', location: 'Phone GPS', lat: null, lon: null, units: 'm', clock: '24' },
+    injected || {});
+
+  // URL params take precedence (open_config.js dev flow passes these)
+  (function() {
+    ['mode', 'location', 'units', 'clock'].forEach(function(k) {
+      var v = getQuery(k); if (v !== null) state[k] = v;
+    });
+    var lat = parseFloat(getQuery('lat')), lon = parseFloat(getQuery('lon'));
+    if (!isNaN(lat)) state.lat = lat;
+    if (!isNaN(lon)) state.lon = lon;
+  })();
+
+  // ---- apply state to UI ----
+  function applyState() {
+    document.getElementById('locValue').textContent = state.location;
+    var chip = document.getElementById('locChip');
+    chip.textContent = state.mode === 'gps' ? 'Phone GPS' : 'Manual';
+    chip.className = 'chip ' + (state.mode === 'gps' ? 'gps' : 'manual');
+    document.getElementById('tabGps').setAttribute('aria-selected', state.mode === 'gps' ? 'true' : 'false');
+    document.getElementById('tabManual').setAttribute('aria-selected', state.mode === 'manual' ? 'true' : 'false');
+    document.getElementById('manualWrap').hidden = state.mode !== 'manual';
+    syncMini('units', state.units, { m: 'Metres', ft: 'Feet' });
+    syncMini('clock', state.clock, { '24': '24h', '12': '12h' });
+  }
+
+  function syncMini(key, val, labels) {
+    document.querySelectorAll('.miniseg button').forEach(function(b) {
+      var oc = b.getAttribute('onclick') || '';
+      if (oc.indexOf("'" + key + "'") > -1) {
+        b.setAttribute('aria-selected', b.textContent.trim() === labels[val] ? 'true' : 'false');
+      }
+    });
+  }
+
+  // ---- mode toggle ----
+  function setMode(m) {
+    state.mode = m;
+    if (m === 'gps') {
+      // Restore GPS-resolved location from what was passed in
+      state.location = getQuery('location') || (injected && injected.mode === 'gps' ? injected.location : 'Phone GPS');
+      var qlat = parseFloat(getQuery('lat')), qlon = parseFloat(getQuery('lon'));
+      state.lat = !isNaN(qlat) ? qlat : (injected && injected.mode === 'gps' ? injected.lat : null);
+      state.lon = !isNaN(qlon) ? qlon : (injected && injected.mode === 'gps' ? injected.lon : null);
+    }
+    applyState();
+    if (m === 'manual') setTimeout(function() { document.getElementById('q').focus(); }, 60);
+  }
+
+  function pick(btn, key, val) {
+    state[key] = val;
+    btn.parentNode.querySelectorAll('button').forEach(function(b) { b.setAttribute('aria-selected', 'false'); });
+    btn.setAttribute('aria-selected', 'true');
+  }
+
+  // ---- search (Open-Meteo geocoding) ----
+  function doSearch(e) {
+    e.preventDefault();
+    var q = document.getElementById('q').value.trim();
+    var ul = document.getElementById('results');
+    var empty = document.getElementById('empty');
+    var btn = document.getElementById('searchBtn');
+    ul.innerHTML = '';
+    if (!q) { ul.hidden = true; empty.hidden = true; return false; }
+    btn.disabled = true;
+    fetch('https://geocoding-api.open-meteo.com/v1/search?name=' + encodeURIComponent(q) + '&count=10&language=en&format=json')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { renderResults(d.results || []); btn.disabled = false; })
+      .catch(function() { renderResults([]); btn.disabled = false; });
+    return false;
+  }
+
+  function renderResults(items) {
+    var ul = document.getElementById('results');
+    var empty = document.getElementById('empty');
+    ul.innerHTML = '';
+    if (!items.length) { ul.hidden = true; empty.hidden = false; return; }
+    empty.hidden = true; ul.hidden = false;
+    items.forEach(function(p) {
+      var nameFull = p.name + (p.admin1 ? ', ' + p.admin1 : '');
+      var parts = [p.admin1, p.country].filter(Boolean);
+      var sub = (parts.length ? parts.join(', ') : '') +
+        (p.latitude != null && p.longitude != null ? ' · ' + p.latitude.toFixed(2) + ', ' + p.longitude.toFixed(2) : '');
+      var li = document.createElement('li');
+      var btn = document.createElement('button');
+      btn.className = 'result'; btn.type = 'button';
+      btn.setAttribute('aria-current', nameFull === state.location && state.mode === 'manual' ? 'true' : 'false');
+      btn.innerHTML =
+        '<span class="rico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.6-7-11a7 7 0 0 1 14 0c0 5.4-7 11-7 11Z"/><circle cx="12" cy="10" r="2.4"/></svg></span>' +
+        '<span class="rmeta"><div class="rname"></div><div class="rsub"></div></span>' +
+        '<svg class="rtick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+      btn.querySelector('.rname').textContent = p.name;
+      btn.querySelector('.rsub').textContent = sub;
+      btn.onclick = function() { choose(p, ul); };
+      li.appendChild(btn); ul.appendChild(li);
+    });
+  }
+
+  function choose(p, ul) {
+    state.mode = 'manual';
+    state.location = p.name + (p.admin1 ? ', ' + p.admin1 : '');
+    state.lat = p.latitude;
+    state.lon = p.longitude;
+    applyState();
+    ul.querySelectorAll('.result').forEach(function(b) {
+      b.setAttribute('aria-current', b.querySelector('.rname').textContent === p.name ? 'true' : 'false');
+    });
+    toast('Location set to ' + state.location);
+  }
+
+  // ---- toast ----
+  var toastT;
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    document.getElementById('toastMsg').textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastT);
+    toastT = setTimeout(function() { t.classList.remove('show'); }, 1900);
+  }
+
+  // ---- save ----
+  function save() {
+    var ret = getQuery('return_to') || 'pebblejs://close#';
+    location.href = ret + encodeURIComponent(JSON.stringify(state));
+  }
+
+  applyState();
+</script>
+</body>
+</html>

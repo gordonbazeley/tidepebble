@@ -1,14 +1,13 @@
 #!/usr/bin/env node
-// Opens TidePebble config in Brave via a local HTTP server.
-// Uses the config page's built-in 'return_to' query param to receive saved settings,
-// persists them to pypkjs localStorage, and asks the watch to refresh.
+// Opens TidePebble settings in Brave via a local HTTP server.
+// Serves src/pkjs/settings.html directly; passes current settings as query params;
+// receives saved settings at /save and persists them to pypkjs localStorage.
 
 var http = require('http');
 var fs = require('fs');
 var path = require('path');
 var child_process = require('child_process');
 
-// Build name-to-numeric-index map from package.json messageKeys.
 var pkg = require(path.resolve(__dirname, '..', 'package.json'));
 var MSG_KEY_INDEX = {};
 (pkg.pebble.messageKeys || []).forEach(function(name, idx) { MSG_KEY_INDEX[name] = idx; });
@@ -16,6 +15,7 @@ var MSG_KEY_INDEX = {};
 var SELECTED_LOCATION_KEY = 'tide_selected_location_v1';
 var APP_UUID = pkg.pebble.uuid;
 var PROJECT_ROOT = path.resolve(__dirname, '..');
+var SETTINGS_HTML = path.resolve(__dirname, 'pkjs', 'settings.html');
 
 function findLocalStorageFile() {
   var candidates = [
@@ -36,7 +36,6 @@ function findLocalStorageFile() {
   return null;
 }
 
-// ---- Mock Pebble / browser environment ----
 var storageData = {};
 var lsFile = findLocalStorageFile();
 if (lsFile) {
@@ -50,76 +49,36 @@ if (lsFile) {
   console.warn('pypkjs localStorage not found; using default settings');
 }
 
-global.localStorage = {
-  getItem: function(k) { return Object.prototype.hasOwnProperty.call(storageData, k) ? storageData[k] : null; },
-  setItem: function(k, v) { storageData[k] = String(v); },
-  removeItem: function(k) { delete storageData[k]; },
-};
-
-var sendAppMessageLog = [];
-var eventHandlers = {};
-
-global.Pebble = {
-  openURL: function() {},
-  sendAppMessage: function(msg) { sendAppMessageLog.push(msg); },
-  addEventListener: function(event, handler) { eventHandlers[event] = handler; },
-  getTimelineToken: function(_s, fail) { if (fail) fail('not available'); },
-};
-
-global.XMLHttpRequest = function() {
-  this.open = function() {};
-  this.setRequestHeader = function() {};
-  this.send = function() {};
-  this.onload = null;
-  this.onerror = null;
-};
-
-// ---- Load app JS ----
-var appJs = path.resolve(__dirname, '..', 'build', 'pebble-js-app.js');
-if (!fs.existsSync(appJs)) {
-  console.error('Error: ' + appJs + ' not found. Run pebble build first.');
+// Read HTML from disk
+if (!fs.existsSync(SETTINGS_HTML)) {
+  console.error('Error: settings HTML not found at', SETTINGS_HTML);
   process.exit(1);
 }
-try {
-  require(appJs);
-} catch (e) {
-  console.error('Error loading app JS:', e.message);
-  process.exit(1);
+var html = fs.readFileSync(SETTINGS_HTML, 'utf8');
+
+// Determine current state from localStorage
+function getCurrentState() {
+  var state = { mode: 'gps', location: 'Phone GPS', lat: null, lon: null, units: 'm', clock: '24' };
+  try {
+    var raw = storageData[SELECTED_LOCATION_KEY];
+    if (raw) {
+      var loc = JSON.parse(raw);
+      state.mode = 'manual';
+      state.location = loc.name + (loc.admin1 ? ', ' + loc.admin1 : '');
+      state.lat = loc.latitude;
+      state.lon = loc.longitude;
+    }
+  } catch (e) {}
+  try {
+    var saved = JSON.parse(storageData['tidepebble.settings'] || 'null');
+    if (saved) {
+      if (saved.units) state.units = saved.units;
+      if (saved.clock) state.clock = saved.clock;
+    }
+  } catch (e) {}
+  return state;
 }
 
-// Fire ready so the app initializes its selected-location state.
-if (eventHandlers['ready']) {
-  try { eventHandlers['ready'](); } catch (e) {}
-}
-
-// Fire showConfiguration to capture the config HTML
-var capturedUrl = null;
-global.Pebble.openURL = function(u) { capturedUrl = u; };
-if (eventHandlers['showConfiguration']) {
-  try { eventHandlers['showConfiguration'](); } catch (e) {}
-}
-
-if (!capturedUrl) {
-  console.error('Error: app JS did not call Pebble.openURL()');
-  process.exit(1);
-}
-
-var html;
-if (capturedUrl.indexOf('base64,') !== -1) {
-  html = Buffer.from(capturedUrl.split('base64,')[1], 'base64').toString('utf8');
-} else if (capturedUrl.startsWith('data:text/html')) {
-  var commaIndex = capturedUrl.indexOf(',');
-  if (commaIndex === -1) {
-    console.error('Unexpected config URL format:', capturedUrl.slice(0, 60));
-    process.exit(1);
-  }
-  html = decodeURIComponent(capturedUrl.slice(commaIndex + 1));
-} else {
-  console.error('Unexpected config URL format:', capturedUrl.slice(0, 40));
-  process.exit(1);
-}
-
-// ---- Helpers ----
 function persistSettings() {
   if (!lsFile) {
     lsFile = path.join(process.env.HOME, '.pebble-dev', APP_UUID, 'localStorage.json');
@@ -127,7 +86,7 @@ function persistSettings() {
   try {
     fs.mkdirSync(path.dirname(lsFile), { recursive: true });
     fs.writeFileSync(lsFile, JSON.stringify(storageData, null, 2));
-    console.log('Selected location persisted to', lsFile);
+    console.log('Settings persisted to', lsFile);
   } catch (e) {
     console.warn('Could not write localStorage file:', e.message);
   }
@@ -135,9 +94,7 @@ function persistSettings() {
 
 function refreshWatch() {
   var key = MSG_KEY_INDEX.tide_status;
-  if (key === undefined) {
-    return;
-  }
+  if (key === undefined) return;
   var args = ['send-app-message', '--emulator', 'emery', '--string', key + '=Refreshing tide data...'];
   try {
     child_process.execFileSync('pebble', args, { cwd: PROJECT_ROOT, timeout: 5000 });
@@ -166,15 +123,34 @@ var server = http.createServer(function(req, res) {
       }
     }
 
-    // Fire webviewclosed: this updates localStorage in the mock environment.
-    sendAppMessageLog = [];
-    if (eventHandlers['webviewclosed']) {
-      try {
-        eventHandlers['webviewclosed']({ response: encodeURIComponent(JSON.stringify(settings)) });
-      } catch (e) {
-        console.warn('webviewclosed error:', e.message);
-      }
+    console.log('Received settings:', JSON.stringify(settings));
+
+    // Persist selected location
+    if (settings.mode === 'gps' || settings.usePhoneLocation) {
+      delete storageData[SELECTED_LOCATION_KEY];
+      console.log('GPS mode: cleared manual location');
+    } else if (settings.mode === 'manual' && typeof settings.lat === 'number') {
+      // New state format
+      var locParts = (settings.location || '').split(', ');
+      storageData[SELECTED_LOCATION_KEY] = JSON.stringify({
+        latitude: settings.lat,
+        longitude: settings.lon,
+        name: locParts[0] || settings.location || 'Unknown',
+        admin1: locParts[1] || '',
+        country: locParts[2] || '',
+      });
+    } else if (typeof settings.latitude === 'number') {
+      // Legacy format
+      storageData[SELECTED_LOCATION_KEY] = JSON.stringify(settings);
     }
+
+    // Persist units/clock preferences
+    try {
+      var existing = JSON.parse(storageData['tidepebble.settings'] || '{}');
+      if (settings.units) existing.units = settings.units;
+      if (settings.clock) existing.clock = settings.clock;
+      storageData['tidepebble.settings'] = JSON.stringify(existing);
+    } catch(e) {}
 
     persistSettings();
     refreshWatch();
@@ -194,7 +170,7 @@ var server = http.createServer(function(req, res) {
     return;
   }
 
-  // Serve config HTML for all other paths; the page reads ?return_to from location.search.
+  // Serve settings HTML with current state as query params
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
 });
@@ -207,7 +183,6 @@ server.on('error', function(error) {
 server.listen(0, '127.0.0.1', function() {
   var port = server.address().port;
 
-  // Auto-close after 10 minutes if the user never saves
   serverTimer = setTimeout(function() {
     console.log('Config server closing after 10-minute timeout.');
     server.close();
@@ -215,11 +190,25 @@ server.listen(0, '127.0.0.1', function() {
 
   var base = 'http://127.0.0.1:' + port;
   var returnTo = encodeURIComponent(base + '/save?data=');
-  var configUrl = base + '/?return_to=' + returnTo;
+
+  // Build query string from current state
+  var state = getCurrentState();
+  var params = [
+    'return_to=' + returnTo,
+    'mode=' + encodeURIComponent(state.mode),
+    'location=' + encodeURIComponent(state.location),
+    'units=' + encodeURIComponent(state.units),
+    'clock=' + encodeURIComponent(state.clock),
+  ];
+  if (state.lat != null) params.push('lat=' + state.lat);
+  if (state.lon != null) params.push('lon=' + state.lon);
+
+  var configUrl = base + '/?' + params.join('&');
 
   try {
     child_process.execSync('open -a "Brave Browser" ' + JSON.stringify(configUrl));
     console.log('Config server: http://127.0.0.1:' + port);
+    console.log('Current state:', JSON.stringify(state));
   } catch (e) {
     console.error('Could not open Brave:', e.message);
     server.close();
