@@ -8,6 +8,7 @@
 #define STATUS_MAX_LEN 48
 #define ARROW_W 8
 #define ARROW_H 7
+#define DOUBLE_TAP_MS 500
 
 static Window *s_window;
 static TextLayer *s_location_layer;
@@ -33,13 +34,15 @@ static int16_t s_current_value = 0;
 static char s_time_display[6] = "--:--";
 static char s_hero_text[8] = "--:--";
 static char s_countdown_prefix[24] = "";
-static char s_countdown_suffix[12] = "";
+static char s_countdown_suffix[16] = "";
 static char s_now_prefix[28] = "";
 static char s_now_suffix[12] = "";
 static GFont s_text_font;
 static GFont s_label_font;
 static GFont s_chart_font;
 static GFont s_now_font;
+static AppTimer *s_double_tap_timer;
+static bool s_waiting_for_double_tap;
 
 // Colors
 #define COLOR_HIGH    PBL_IF_COLOR_ELSE(GColorIslamicGreen, GColorBlack)
@@ -158,9 +161,9 @@ static void prv_set_text(void) {
     char ht[12];
     prv_format_height(ht, sizeof(ht), s_tide_values[s_next_index]);
     if (h > 0) {
-      snprintf(s_countdown_prefix, sizeof(s_countdown_prefix), "in %dh %02dm  ", h, m);
+      snprintf(s_countdown_prefix, sizeof(s_countdown_prefix), "In %dh %02dm  ", h, m);
     } else {
-      snprintf(s_countdown_prefix, sizeof(s_countdown_prefix), "in %dm  ", m);
+      snprintf(s_countdown_prefix, sizeof(s_countdown_prefix), "In %dm  ", m);
     }
     snprintf(s_countdown_suffix, sizeof(s_countdown_suffix), "%sm", ht);
   } else {
@@ -190,14 +193,14 @@ static void prv_draw_countdown(Layer *layer, GContext *ctx) {
     return;
   }
   GRect mbox = GRect(0, 0, 200, bounds.size.h);
-  GSize ps = graphics_text_layout_get_content_size(s_countdown_prefix, s_text_font, mbox,
+  GSize ps = graphics_text_layout_get_content_size(s_countdown_prefix, s_label_font, mbox,
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
   GSize ss = graphics_text_layout_get_content_size(s_countdown_suffix, s_now_font, mbox,
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
   int16_t x = (bounds.size.w - ps.w - ss.w) / 2;
   if (x < 2) x = 2;
   graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorDarkGray, GColorBlack));
-  graphics_draw_text(ctx, s_countdown_prefix, s_text_font,
+  graphics_draw_text(ctx, s_countdown_prefix, s_label_font,
     GRect(x, 0, ps.w + 4, bounds.size.h),
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
   graphics_context_set_text_color(ctx, GColorBlack);
@@ -324,17 +327,11 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
     int16_t lx = ax - label_w / 2;
     if (lx < mx) lx = mx;
     if (lx > mx + w - label_w) lx = mx + w - label_w;
-    // HIGH: anchor label at chart bottom (wave is near top at peak x — no overlap)
-    // LOW: anchor label just below the trough triangle
-    int16_t ly;
-    if (s_after_next_high) {
-      ly = my + h - label_h - 2;
-    } else {
-      ly = ay + ARROW_H + 2;
-      if (ly + label_h > my + h) ly = my + h - label_h;
-    }
+    int16_t ly = s_after_next_high ? my + h - label_h - 2 : my + 2;
+    GRect label_box = GRect(lx, ly, label_w, label_h);
+    graphics_context_set_text_color(ctx, label_color);
     graphics_draw_text(ctx, after_time, s_label_font,
-      GRect(lx, ly, label_w, label_h),
+      label_box,
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 }
@@ -402,6 +399,26 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
 
 static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   prv_set_text();
+}
+
+static void prv_double_tap_timeout(void *context) {
+  s_double_tap_timer = NULL;
+  s_waiting_for_double_tap = false;
+}
+
+static void prv_tap_handler(AccelAxisType axis, int32_t direction) {
+  if (s_waiting_for_double_tap) {
+    if (s_double_tap_timer) {
+      app_timer_cancel(s_double_tap_timer);
+      s_double_tap_timer = NULL;
+    }
+    s_waiting_for_double_tap = false;
+    light_enable_interaction();
+    return;
+  }
+
+  s_waiting_for_double_tap = true;
+  s_double_tap_timer = app_timer_register(DOUBLE_TAP_MS, prv_double_tap_timeout, NULL);
 }
 
 static TextLayer *prv_make_text_layer(GRect frame, GFont font, GTextAlignment alignment) {
@@ -524,10 +541,15 @@ static void prv_init(void) {
   app_message_register_inbox_received(prv_inbox_received);
   app_message_open(512, 128);
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick_handler);
+  accel_tap_service_subscribe(prv_tap_handler);
 }
 
 static void prv_deinit(void) {
+  accel_tap_service_unsubscribe();
   tick_timer_service_unsubscribe();
+  if (s_double_tap_timer) {
+    app_timer_cancel(s_double_tap_timer);
+  }
   window_destroy(s_window);
   gpath_destroy(s_arrow_up_path);
   gpath_destroy(s_arrow_down_path);
