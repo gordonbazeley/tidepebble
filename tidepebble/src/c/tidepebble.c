@@ -45,10 +45,10 @@ static AppTimer *s_double_tap_timer;
 static bool s_waiting_for_double_tap;
 
 // Colors
-#define COLOR_HIGH    PBL_IF_COLOR_ELSE(GColorIslamicGreen, GColorBlack)
-#define COLOR_LOW     PBL_IF_COLOR_ELSE(GColorRed, GColorBlack)
-#define COLOR_NOW     PBL_IF_COLOR_ELSE(GColorTiffanyBlue, GColorBlack)
-#define COLOR_NOW_HALO PBL_IF_COLOR_ELSE(GColorCeleste, GColorLightGray)
+#define COLOR_HIGH     PBL_IF_COLOR_ELSE(GColorBrightGreen,   GColorWhite)
+#define COLOR_LOW      PBL_IF_COLOR_ELSE(GColorRed,           GColorWhite)
+#define COLOR_NOW      PBL_IF_COLOR_ELSE(GColorCyan,          GColorWhite)
+#define COLOR_NOW_HALO PBL_IF_COLOR_ELSE(GColorTiffanyBlue,   GColorDarkGray)
 
 // Filled triangle paths (tip coordinates: up=top-centre, down=bottom-centre)
 static GPoint s_arrow_up_pts[]   = {{ARROW_W / 2, 0}, {0, ARROW_H}, {ARROW_W, ARROW_H}};
@@ -211,7 +211,7 @@ static void prv_draw_countdown(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   if (s_countdown_prefix[0] == '\0') {
     // No tide data — show status centred in regular gray
-    graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorDarkGray, GColorBlack));
+    graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorLightGray));
     graphics_draw_text(ctx, s_status, s_text_font,
       GRect(0, 0, bounds.size.w, bounds.size.h),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
@@ -224,11 +224,11 @@ static void prv_draw_countdown(Layer *layer, GContext *ctx) {
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
   int16_t x = (bounds.size.w - ps.w - ss.w) / 2;
   if (x < 2) x = 2;
-  graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorDarkGray, GColorBlack));
+  graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorLightGray));
   graphics_draw_text(ctx, s_countdown_prefix, s_label_font,
     GRect(x, 0, ps.w + 4, bounds.size.h),
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_context_set_text_color(ctx, GColorWhite);
   graphics_draw_text(ctx, s_countdown_suffix, s_now_font,
     GRect(x + ps.w, 0, ss.w + 8, bounds.size.h),
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
@@ -282,7 +282,7 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
   const int16_t h = bounds.size.h - my * 2;
 
   if (s_tide_count < 2) {
-    graphics_context_set_stroke_color(ctx, GColorLightGray);
+    graphics_context_set_stroke_color(ctx, GColorDarkGray);
     graphics_draw_rect(ctx, GRect(mx, my, w, h));
     return;
   }
@@ -295,7 +295,7 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
   if (max_v == min_v) max_v += 1;
 
   // Tide sparkline (3px thick)
-  graphics_context_set_stroke_color(ctx, PBL_IF_COLOR_ELSE(GColorBlue, GColorBlack));
+  graphics_context_set_stroke_color(ctx, PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorWhite));
   GPoint prev = GPoint(mx, my + h);
   for (int16_t i = 0; i < s_tide_count; i++) {
     int16_t x = mx + (w * i / (s_tide_count - 1));
@@ -339,11 +339,10 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
     int16_t ay = my + h - ((s_tide_values[s_after_next_index] - min_v) * h / (max_v - min_v));
     prv_draw_chart_event(ctx, s_after_next_high, ax, ay);
 
-    // Time label above/below the marker, clamped to chart
+    // Time label placed at the opposite end of the chart from the event
     char after_time[6];
     prv_format_time_for_index(after_time, sizeof(after_time), s_after_next_index);
     GColor label_color = s_after_next_high ? COLOR_HIGH : COLOR_LOW;
-    graphics_context_set_text_color(ctx, label_color);
     // Use bold label font; size the box to fit it on each platform
     const int16_t label_w = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
       52, 52, 52, 52, 68, 68, 52);
@@ -353,6 +352,9 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
     if (lx < mx) lx = mx;
     if (lx > mx + w - label_w) lx = mx + w - label_w;
     int16_t ly = s_after_next_high ? my + h - label_h - 2 : my + 2;
+    // Line from peak/trough to label centre
+    graphics_context_set_stroke_color(ctx, label_color);
+    graphics_draw_line(ctx, GPoint(ax, ay), GPoint(lx + label_w / 2, ly + label_h / 2));
     GRect label_box = GRect(lx, ly, label_w, label_h);
     graphics_context_set_text_color(ctx, label_color);
     graphics_draw_text(ctx, after_time, s_label_font,
@@ -378,7 +380,7 @@ static void prv_draw_now_row(Layer *layer, GContext *ctx) {
 
   GColor trend_color = s_rising ? COLOR_NOW : COLOR_LOW;
 
-  graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorDarkGray, GColorBlack));
+  graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorLightGray));
   graphics_draw_text(ctx, s_now_prefix, s_now_font,
     GRect(x, 0, ps.w + 4, bounds.size.h),
     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
@@ -449,7 +451,7 @@ static void prv_tap_handler(AccelAxisType axis, int32_t direction) {
 static TextLayer *prv_make_text_layer(GRect frame, GFont font, GTextAlignment alignment) {
   TextLayer *layer = text_layer_create(frame);
   text_layer_set_background_color(layer, GColorClear);
-  text_layer_set_text_color(layer, GColorBlack);
+  text_layer_set_text_color(layer, GColorWhite);
   text_layer_set_font(layer, font);
   text_layer_set_text_alignment(layer, alignment);
   return layer;
@@ -556,7 +558,7 @@ static void prv_init(void) {
   s_arrow_down_path = gpath_create(&s_arrow_down_info);
 
   s_window = window_create();
-  window_set_background_color(s_window, GColorWhite);
+  window_set_background_color(s_window, GColorBlack);
   window_set_window_handlers(s_window, (WindowHandlers) {
     .load   = prv_window_load,
     .unload = prv_window_unload,
