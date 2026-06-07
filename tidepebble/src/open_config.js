@@ -58,7 +58,7 @@ var html = fs.readFileSync(SETTINGS_HTML, 'utf8');
 
 // Determine current state from localStorage
 function getCurrentState() {
-  var state = { mode: 'gps', location: 'Phone GPS', lat: null, lon: null, units: 'm', clock: '24' };
+  var state = { mode: 'gps', location: 'Phone GPS', lat: null, lon: null };
   try {
     var raw = storageData[SELECTED_LOCATION_KEY];
     if (raw) {
@@ -67,13 +67,6 @@ function getCurrentState() {
       state.location = loc.name + (loc.admin1 ? ', ' + loc.admin1 : '');
       state.lat = loc.latitude;
       state.lon = loc.longitude;
-    }
-  } catch (e) {}
-  try {
-    var saved = JSON.parse(storageData['tidepebble.settings'] || 'null');
-    if (saved) {
-      if (saved.units) state.units = saved.units;
-      if (saved.clock) state.clock = saved.clock;
     }
   } catch (e) {}
   return state;
@@ -142,14 +135,6 @@ var server = http.createServer(function(req, res) {
       storageData[SELECTED_LOCATION_KEY] = JSON.stringify(settings);
     }
 
-    // Persist units/clock preferences
-    try {
-      var existing = JSON.parse(storageData['tidepebble.settings'] || '{}');
-      if (settings.units) existing.units = settings.units;
-      if (settings.clock) existing.clock = settings.clock;
-      storageData['tidepebble.settings'] = JSON.stringify(existing);
-    } catch(e) {}
-
     persistSettings();
     refreshWatch();
 
@@ -195,8 +180,6 @@ server.listen(0, '127.0.0.1', function() {
     'return_to=' + returnTo,
     'mode=' + encodeURIComponent(state.mode),
     'location=' + encodeURIComponent(state.location),
-    'units=' + encodeURIComponent(state.units),
-    'clock=' + encodeURIComponent(state.clock),
   ];
   if (state.lat != null) params.push('lat=' + state.lat);
   if (state.lon != null) params.push('lon=' + state.lon);

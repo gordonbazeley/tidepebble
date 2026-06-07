@@ -14,8 +14,8 @@
   var SELECTED_LOCATION_KEY = 'tide_selected_location_v1';
   var s_selectedLocation = null;
 
-  function send(payload) {
-    Pebble.sendAppMessage(payload);
+  function send(payload, onSuccess, onError) {
+    Pebble.sendAppMessage(payload, onSuccess, onError);
   }
 
   function sendChunkSequence(chunks, index, currentMinutes, fallbackLabel) {
@@ -27,7 +27,7 @@
       tide_sample_offset: chunks[index].offset,
       tide_values: chunks[index].values
     };
-    Pebble.sendAppMessage(payload, function() {
+    send(payload, function() {
       setTimeout(function() {
         sendChunkSequence(chunks, index + 1, currentMinutes, fallbackLabel);
       }, 150);
@@ -176,7 +176,7 @@
             values: values.slice(chunkStart, chunkStart + TIDE_CHUNK_SIZE).join('')
           });
         }
-        Pebble.sendAppMessage({
+        send({
           tide_location: label,
           tide_status: '',
           tide_current_minutes: currentMinutes
@@ -232,7 +232,7 @@
       if (!data) {
         return;
       }
-      // New state format: {mode, location, lat, lon, units, clock}
+      // New state format: {mode, location, lat, lon}
       if (data.mode === 'gps' || data.usePhoneLocation) {
         clearSelectedLocation();
         refresh();
@@ -268,8 +268,6 @@
       location: s_selectedLocation ? geocodingLabel(s_selectedLocation) : 'Phone GPS',
       lat: s_selectedLocation ? s_selectedLocation.latitude : null,
       lon: s_selectedLocation ? s_selectedLocation.longitude : null,
-      units: 'm',
-      clock: '24',
     };
     var init = 'var injected=' + JSON.stringify(state) + ';';
     var html = SETTINGS_HTML.replace('/*STATE_INIT*/', init);

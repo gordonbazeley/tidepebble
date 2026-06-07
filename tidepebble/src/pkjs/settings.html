@@ -216,8 +216,8 @@
       </div>
     </div>
     <p class="hd-sub">Watch settings</p>
-    <h1 class="hd-title">Location &amp; display</h1>
-    <p class="hd-desc">Choose where TidePebble reads tides for, and how they appear on your watch.</p>
+    <h1 class="hd-title">Location</h1>
+    <p class="hd-desc">Choose where TidePebble reads tides from.</p>
     <svg class="wave" viewBox="0 0 560 22" preserveAspectRatio="none" aria-hidden="true">
       <path d="M0 12 C 70 2, 140 2, 210 12 S 350 22, 420 12 S 560 2, 630 12 L 630 22 L 0 22 Z" fill="var(--bg)"/>
     </svg>
@@ -267,33 +267,6 @@
     </section>
 
     <section>
-      <p class="seclabel">Watch display</p>
-      <div class="card">
-        <div class="row">
-          <div class="rl">
-            <div class="rt">Tide height units</div>
-            <div class="rd">How depths show on the watch face</div>
-          </div>
-          <div class="miniseg" role="tablist" aria-label="Units">
-            <button role="tab" aria-selected="true" onclick="pick(this,'units','m')">Metres</button>
-            <button role="tab" aria-selected="false" onclick="pick(this,'units','ft')">Feet</button>
-          </div>
-        </div>
-        <div class="divide"></div>
-        <div class="row">
-          <div class="rl">
-            <div class="rt">Clock format</div>
-            <div class="rd">Tide times on the watch</div>
-          </div>
-          <div class="miniseg" role="tablist" aria-label="Clock format">
-            <button role="tab" aria-selected="true" onclick="pick(this,'clock','24')">24h</button>
-            <button role="tab" aria-selected="false" onclick="pick(this,'clock','12')">12h</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section>
       <p class="seclabel">Data sources</p>
       <div class="card">
         <div class="pad">
@@ -332,12 +305,12 @@
   if (typeof injected === 'undefined') {
     var injected = null;
   }
-  var state = Object.assign({ mode: 'gps', location: 'Phone GPS', lat: null, lon: null, units: 'm', clock: '24' },
+  var state = Object.assign({ mode: 'gps', location: 'Phone GPS', lat: null, lon: null },
     injected || {});
 
   // URL params take precedence (open_config.js dev flow passes these)
   (function() {
-    ['mode', 'location', 'units', 'clock'].forEach(function(k) {
+    ['mode', 'location'].forEach(function(k) {
       var v = getQuery(k); if (v !== null) state[k] = v;
     });
     var lat = parseFloat(getQuery('lat')), lon = parseFloat(getQuery('lon'));
@@ -354,17 +327,6 @@
     document.getElementById('tabGps').setAttribute('aria-selected', state.mode === 'gps' ? 'true' : 'false');
     document.getElementById('tabManual').setAttribute('aria-selected', state.mode === 'manual' ? 'true' : 'false');
     document.getElementById('manualWrap').hidden = state.mode !== 'manual';
-    syncMini('units', state.units, { m: 'Metres', ft: 'Feet' });
-    syncMini('clock', state.clock, { '24': '24h', '12': '12h' });
-  }
-
-  function syncMini(key, val, labels) {
-    document.querySelectorAll('.miniseg button').forEach(function(b) {
-      var oc = b.getAttribute('onclick') || '';
-      if (oc.indexOf("'" + key + "'") > -1) {
-        b.setAttribute('aria-selected', b.textContent.trim() === labels[val] ? 'true' : 'false');
-      }
-    });
   }
 
   // ---- mode toggle ----
@@ -379,12 +341,6 @@
     }
     applyState();
     if (m === 'manual') setTimeout(function() { document.getElementById('q').focus(); }, 60);
-  }
-
-  function pick(btn, key, val) {
-    state[key] = val;
-    btn.parentNode.querySelectorAll('button').forEach(function(b) { b.setAttribute('aria-selected', 'false'); });
-    btn.setAttribute('aria-selected', 'true');
   }
 
   // ---- search (Open-Meteo geocoding) ----

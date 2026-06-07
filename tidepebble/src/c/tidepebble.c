@@ -93,9 +93,33 @@ static bool prv_is_tide_event(int16_t index, bool high) {
     s_tide_values[index] <= s_tide_values[index + 1];
 }
 
+static bool prv_use_metric_units(void) {
+  return PBL_IF_HEALTH_ELSE(
+    health_service_get_measurement_system_for_display(HealthMetricWalkedDistanceMeters) !=
+      MeasurementSystemImperial,
+    true);
+}
+
 static void prv_format_height(char *buffer, size_t buffer_size, int16_t value) {
-  snprintf(buffer, buffer_size, "%s%d.%02d",
-    value < 0 ? "-" : "", abs(value) / 100, abs(value) % 100);
+  if (prv_use_metric_units()) {
+    snprintf(buffer, buffer_size, "%s%d.%02dm",
+      value < 0 ? "-" : "", abs(value) / 100, abs(value) % 100);
+    return;
+  }
+
+  int32_t feet_tenths = ((int32_t)value * 328084 + (value < 0 ? -500000 : 500000)) / 1000000;
+  snprintf(buffer, buffer_size, "%s%ld.%ldft",
+    feet_tenths < 0 ? "-" : "", labs(feet_tenths) / 10, labs(feet_tenths) % 10);
+}
+
+static const char *prv_clock_format(void) {
+  return clock_is_24h_style() ? "%H:%M" : "%I:%M";
+}
+
+static void prv_strip_leading_zero(char *buffer) {
+  if (!clock_is_24h_style() && buffer[0] == '0') {
+    memmove(buffer, buffer + 1, strlen(buffer));
+  }
 }
 
 static void prv_format_time_for_index(char *buffer, size_t buffer_size, int16_t index) {
@@ -103,7 +127,8 @@ static void prv_format_time_for_index(char *buffer, size_t buffer_size, int16_t 
   time_t base_time = now - ((time_t)s_current_minutes * 60);
   time_t sample_time = base_time + ((time_t)index * 60 * 60);
   struct tm *sample_tm = localtime(&sample_time);
-  strftime(buffer, buffer_size, clock_is_24h_style() ? "%H:%M" : "%I:%M", sample_tm);
+  strftime(buffer, buffer_size, prv_clock_format(), sample_tm);
+  prv_strip_leading_zero(buffer);
 }
 
 static void prv_compute_state(void) {
@@ -135,8 +160,8 @@ static void prv_compute_state(void) {
 
 static void prv_set_text(void) {
   time_t now = time(NULL);
-  strftime(s_time_display, sizeof(s_time_display),
-    clock_is_24h_style() ? "%H:%M" : "%I:%M", localtime(&now));
+  strftime(s_time_display, sizeof(s_time_display), prv_clock_format(), localtime(&now));
+  prv_strip_leading_zero(s_time_display);
   text_layer_set_text(s_time_layer, s_time_display);
   text_layer_set_text(s_location_layer, s_location);
 
@@ -158,22 +183,22 @@ static void prv_set_text(void) {
     int16_t minutes_to = s_next_index * 60 - s_current_minutes;
     int16_t h = minutes_to / 60;
     int16_t m = minutes_to % 60;
-    char ht[12];
+    char ht[16];
     prv_format_height(ht, sizeof(ht), s_tide_values[s_next_index]);
     if (h > 0) {
       snprintf(s_countdown_prefix, sizeof(s_countdown_prefix), "In %dh %02dm  ", h, m);
     } else {
       snprintf(s_countdown_prefix, sizeof(s_countdown_prefix), "In %dm  ", m);
     }
-    snprintf(s_countdown_suffix, sizeof(s_countdown_suffix), "%sm", ht);
+    snprintf(s_countdown_suffix, sizeof(s_countdown_suffix), "%s", ht);
   } else {
     text_layer_set_text(s_hero_layer, "--:--");
     s_countdown_prefix[0] = '\0';
   }
 
-  char ht[12];
+  char ht[16];
   prv_format_height(ht, sizeof(ht), s_current_value);
-  snprintf(s_now_prefix, sizeof(s_now_prefix), "Now %sm  ", ht);
+  snprintf(s_now_prefix, sizeof(s_now_prefix), "Now %s  ", ht);
   strncpy(s_now_suffix, s_rising ? "Rising" : "Falling", sizeof(s_now_suffix) - 1);
 
   layer_mark_dirty(s_event_label_layer);
