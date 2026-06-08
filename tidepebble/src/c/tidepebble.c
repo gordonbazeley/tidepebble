@@ -48,6 +48,7 @@ static int16_t s_current_value = 0;
 static char s_time_display[6] = "--:--";
 static GFont s_text_font;
 static GFont s_label_font;
+static GFont s_detail_font;
 static GFont s_chart_font;
 static GFont s_overview_label_font;
 static GFont s_hero_font;
@@ -355,7 +356,7 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   prv_draw_event_heading(ctx, GRect(x, y, frame.size.w - 24, 28), prefix, high, s_label_font);
 
   GFont time_font = layout == EventCardLayoutLarge ? s_large_time_font : s_compact_time_font;
-  GFont detail_font = layout == EventCardLayoutSmall ? s_chart_font : s_text_font;
+  GFont detail_font = s_detail_font;
   int16_t time_h = layout == EventCardLayoutLarge ? 72 : 34;
   int16_t time_y;
   int16_t detail_h = layout == EventCardLayoutSmall ? 22 : 28;
@@ -374,7 +375,7 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   prv_draw_text(ctx, time_text, time_font,
     GRect(x, time_y, frame.size.w - 24, time_h), GColorWhite, GTextAlignmentLeft);
   prv_draw_text(ctx, detail_text, detail_font,
-    GRect(x, detail_y, frame.size.w - 24, detail_h), COLOR_MUTED, GTextAlignmentLeft);
+    GRect(x, detail_y, frame.size.w - 24, detail_h), GColorWhite, GTextAlignmentLeft);
 }
 
 static void prv_draw_now_card(GContext *ctx, GRect frame) {
@@ -620,6 +621,10 @@ static void prv_window_load(Window *window) {
     FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18,
     FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_18));
   s_label_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
+    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
+    FONT_KEY_GOTHIC_18_BOLD));
+  s_detail_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
     FONT_KEY_GOTHIC_18_BOLD));
