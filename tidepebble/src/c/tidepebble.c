@@ -49,6 +49,7 @@ static char s_time_display[6] = "--:--";
 static GFont s_text_font;
 static GFont s_label_font;
 static GFont s_chart_font;
+static GFont s_overview_label_font;
 static GFont s_hero_font;
 static GFont s_large_time_font;
 static GFont s_compact_time_font;
@@ -225,27 +226,22 @@ static void prv_draw_page_dots(GContext *ctx, GRect bounds) {
 
 static void prv_draw_chart_event(GContext *ctx, bool high, int16_t px, int16_t py) {
   graphics_context_set_fill_color(ctx, high ? COLOR_HIGH : COLOR_LOW);
-  prv_draw_arrow(ctx, high, px - ARROW_W / 2, high ? py : py - ARROW_H);
+  prv_draw_arrow(ctx, high, px - ARROW_W / 2, high ? py - 12 : py + 3);
 }
 
-static void prv_draw_chart_event_label(GContext *ctx, bool high, const char *text,
+static void prv_draw_chart_event_label(GContext *ctx, const char *text,
                                        int16_t center_x, int16_t y, GColor color,
                                        GRect frame) {
-  const int16_t label_w = 44;
+  const int16_t label_w = 48;
   int16_t x = center_x - label_w / 2;
-  if (x < frame.origin.x + 1) x = frame.origin.x + 1;
-  if (x > frame.origin.x + frame.size.w - label_w - 1) {
-    x = frame.origin.x + frame.size.w - label_w - 1;
-  }
 
-  graphics_context_set_fill_color(ctx, color);
-  prv_draw_arrow(ctx, high, x, y + 6);
-  prv_draw_text(ctx, text, s_chart_font,
-    GRect(x + ARROW_W + 2, y, label_w - ARROW_W - 2, 22), color, GTextAlignmentLeft);
+  prv_draw_text(ctx, text, s_overview_label_font,
+    GRect(x, y, label_w, 24), color, GTextAlignmentCenter);
 }
 
 static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
-  const int16_t mx = 6, my = 6;
+  const int16_t mx = labels ? 26 : 6;
+  const int16_t my = 6;
   const int16_t w = frame.size.w - mx * 2;
   const int16_t h = frame.size.h - my * 2;
   const int16_t label_h = labels ? 22 : 0;
@@ -312,7 +308,7 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
     prv_format_time_for_index(event_time, sizeof(event_time), index);
     GColor label_color = s_event_highs[e] ? COLOR_HIGH : COLOR_LOW;
     int16_t ly = s_event_highs[e] ? frame.origin.y + my : plot_y + plot_h + 1;
-    prv_draw_chart_event_label(ctx, s_event_highs[e], event_time, ex, ly, label_color, frame);
+    prv_draw_chart_event_label(ctx, event_time, ex, ly, label_color, frame);
   }
 }
 
@@ -352,7 +348,7 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   prv_format_time_for_index(time_text, sizeof(time_text), index);
   prv_format_height(height_text, sizeof(height_text), s_tide_values[index]);
   prv_format_minutes_to(countdown_text, sizeof(countdown_text), index);
-  snprintf(detail_text, sizeof(detail_text), "%s - %s", countdown_text, height_text);
+  snprintf(detail_text, sizeof(detail_text), "%s %s", countdown_text, height_text);
 
   prv_draw_card_background(ctx, frame, card, color);
   int16_t x = frame.origin.x + 18;
@@ -424,13 +420,12 @@ static void prv_draw_then_page(GContext *ctx, GRect bounds) {
 }
 
 static void prv_draw_later_page(GContext *ctx, GRect bounds) {
-  const int16_t title_h = 20;
-  const int16_t title_gap = 3;
+  const int16_t title_h = 22;
   prv_draw_text(ctx, "LATER", s_label_font,
-    GRect(0, 0, bounds.size.w - PAGE_DOTS_W / 2, title_h),
+    GRect(0, -9, bounds.size.w - PAGE_DOTS_W / 2, title_h),
     COLOR_MUTED, GTextAlignmentCenter);
   int16_t content_w = bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W;
-  int16_t cards_y = title_h + title_gap;
+  int16_t cards_y = 20;
   int16_t card_h = (bounds.size.h - cards_y - PAGE_MARGIN - CARD_GAP) / 2;
   prv_draw_event_card(ctx, GRect(PAGE_MARGIN, cards_y, content_w, card_h), 2, "",
     EventCardLayoutSmall);
@@ -533,6 +528,8 @@ static void prv_double_tap_timeout(void *context) {
 }
 
 static void prv_tap_handler(AccelAxisType axis, int32_t direction) {
+  light_enable_interaction();
+
   if (s_waiting_for_double_tap) {
     if (s_double_tap_timer) {
       app_timer_cancel(s_double_tap_timer);
@@ -600,6 +597,10 @@ static void prv_window_load(Window *window) {
     FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18,
     FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_18));
   s_label_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
+    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
+    FONT_KEY_GOTHIC_18_BOLD));
+  s_overview_label_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
     FONT_KEY_GOTHIC_18_BOLD));
