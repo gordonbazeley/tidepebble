@@ -4,20 +4,34 @@
 #include <string.h>
 
 #define TIDE_POINT_COUNT 24
+#define TIDE_EVENT_COUNT 4
 #define LOCATION_MAX_LEN 48
 #define STATUS_MAX_LEN 48
 #define ARROW_W 8
 #define ARROW_H 7
 #define DOUBLE_TAP_MS 500
+#define PAGE_MARGIN 8
+#define PAGE_DOTS_W 20
+#define CARD_GAP 8
+
+typedef enum {
+  TidePageOverview = 0,
+  TidePageNowNext = 1,
+  TidePageThen = 2,
+  TidePageLater = 3,
+  TidePageCount = 4,
+} TidePage;
+
+typedef enum {
+  EventCardLayoutLarge,
+  EventCardLayoutNext,
+  EventCardLayoutSmall,
+} EventCardLayout;
 
 static Window *s_window;
 static TextLayer *s_location_layer;
 static TextLayer *s_time_layer;
-static Layer *s_event_label_layer;
-static TextLayer *s_hero_layer;
-static Layer *s_countdown_layer;
-static Layer *s_chart_layer;
-static Layer *s_now_row_layer;
+static Layer *s_content_layer;
 
 static int16_t s_tide_values[TIDE_POINT_COUNT];
 static int16_t s_tide_count;
@@ -25,34 +39,35 @@ static int16_t s_current_minutes;
 static char s_location[LOCATION_MAX_LEN] = "TidePebble";
 static char s_status[STATUS_MAX_LEN] = "Waiting for phone...";
 
-static int16_t s_next_index = -1;
-static bool s_next_high = true;
-static int16_t s_after_next_index = -1;
-static bool s_after_next_high = false;
+static TidePage s_page = TidePageNowNext;
+static int16_t s_event_indices[TIDE_EVENT_COUNT];
+static bool s_event_highs[TIDE_EVENT_COUNT];
+static int16_t s_event_count;
 static bool s_rising = true;
 static int16_t s_current_value = 0;
 static char s_time_display[6] = "--:--";
-static char s_hero_text[8] = "--:--";
-static char s_countdown_prefix[24] = "";
-static char s_countdown_suffix[16] = "";
-static char s_now_prefix[28] = "";
-static char s_now_suffix[12] = "";
 static GFont s_text_font;
 static GFont s_label_font;
 static GFont s_chart_font;
-static GFont s_now_font;
+static GFont s_hero_font;
+static GFont s_large_time_font;
+static GFont s_compact_time_font;
 static AppTimer *s_double_tap_timer;
 static bool s_waiting_for_double_tap;
 
-// Colors
-#define COLOR_HIGH     PBL_IF_COLOR_ELSE(GColorBrightGreen,   GColorWhite)
-#define COLOR_LOW      PBL_IF_COLOR_ELSE(GColorRed,           GColorWhite)
-#define COLOR_NOW      PBL_IF_COLOR_ELSE(GColorCyan,          GColorWhite)
-#define COLOR_NOW_HALO PBL_IF_COLOR_ELSE(GColorTiffanyBlue,   GColorDarkGray)
+#define COLOR_HIGH      PBL_IF_COLOR_ELSE(GColorBrightGreen, GColorWhite)
+#define COLOR_LOW       PBL_IF_COLOR_ELSE(GColorOrange, GColorWhite)
+#define COLOR_NOW       PBL_IF_COLOR_ELSE(GColorCyan, GColorWhite)
+#define COLOR_NOW_HALO  PBL_IF_COLOR_ELSE(GColorTiffanyBlue, GColorDarkGray)
+#define COLOR_MUTED     PBL_IF_COLOR_ELSE(GColorLightGray, GColorWhite)
+#define COLOR_DIM       PBL_IF_COLOR_ELSE(GColorDarkGray, GColorWhite)
+#define COLOR_BLUE_LINE PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorWhite)
+#define COLOR_NOW_CARD  PBL_IF_COLOR_ELSE(GColorMidnightGreen, GColorBlack)
+#define COLOR_HIGH_CARD PBL_IF_COLOR_ELSE(GColorDarkGreen, GColorBlack)
+#define COLOR_LOW_CARD  PBL_IF_COLOR_ELSE(GColorBulgarianRose, GColorBlack)
 
-// Filled triangle paths (tip coordinates: up=top-centre, down=bottom-centre)
-static GPoint s_arrow_up_pts[]   = {{ARROW_W / 2, 0}, {0, ARROW_H}, {ARROW_W, ARROW_H}};
-static GPathInfo s_arrow_up_info  = {3, s_arrow_up_pts};
+static GPoint s_arrow_up_pts[] = {{ARROW_W / 2, 0}, {0, ARROW_H}, {ARROW_W, ARROW_H}};
+static GPathInfo s_arrow_up_info = {3, s_arrow_up_pts};
 static GPath *s_arrow_up_path;
 static GPoint s_arrow_down_pts[] = {{0, 0}, {ARROW_W, 0}, {ARROW_W / 2, ARROW_H}};
 static GPathInfo s_arrow_down_info = {3, s_arrow_down_pts};
@@ -74,7 +89,7 @@ static int16_t prv_parse_values(const char *csv, int16_t offset) {
        chunk_offset + 1 < length && count < TIDE_POINT_COUNT;
        chunk_offset += 2) {
     int8_t high = prv_tide_value_digit(csv[chunk_offset]);
-    int8_t low  = prv_tide_value_digit(csv[chunk_offset + 1]);
+    int8_t low = prv_tide_value_digit(csv[chunk_offset + 1]);
     if (high < 0 || low < 0) continue;
     if (offset + count < TIDE_POINT_COUNT) {
       s_tide_values[offset + count] = ((high << 6) | low) - 2048;
@@ -102,8 +117,9 @@ static bool prv_use_metric_units(void) {
 
 static void prv_format_height(char *buffer, size_t buffer_size, int16_t value) {
   if (prv_use_metric_units()) {
-    snprintf(buffer, buffer_size, "%s%d.%02dm",
-      value < 0 ? "-" : "", abs(value) / 100, abs(value) % 100);
+    int16_t tenths = (value + (value < 0 ? -5 : 5)) / 10;
+    snprintf(buffer, buffer_size, "%s%d.%dm",
+      tenths < 0 ? "-" : "", abs(tenths) / 10, abs(tenths) % 10);
     return;
   }
 
@@ -131,159 +147,115 @@ static void prv_format_time_for_index(char *buffer, size_t buffer_size, int16_t 
   prv_strip_leading_zero(buffer);
 }
 
+static void prv_format_minutes_to(char *buffer, size_t buffer_size, int16_t index) {
+  int16_t minutes_to = index * 60 - s_current_minutes;
+  if (minutes_to < 0) minutes_to = 0;
+  int16_t h = minutes_to / 60;
+  int16_t m = minutes_to % 60;
+  if (h > 0) {
+    snprintf(buffer, buffer_size, "in %dh %02dm", h, m);
+  } else {
+    snprintf(buffer, buffer_size, "in %dm", m);
+  }
+}
+
+static int16_t prv_current_sample_x(int16_t width) {
+  if (s_tide_count < 2) return 0;
+  int32_t max_minutes = (int32_t)(s_tide_count - 1) * 60;
+  int32_t minutes = s_current_minutes;
+  if (minutes < 0) minutes = 0;
+  if (minutes > max_minutes) minutes = max_minutes;
+  return (int16_t)((int32_t)width * minutes / max_minutes);
+}
+
 static void prv_compute_state(void) {
-  s_next_index = -1;
-  s_after_next_index = -1;
+  s_event_count = 0;
+  for (int16_t i = 0; i < TIDE_EVENT_COUNT; i++) {
+    s_event_indices[i] = -1;
+    s_event_highs[i] = true;
+  }
   if (s_tide_count < 2) return;
 
-  int16_t frac = s_current_minutes < 0 ? 0 : (s_current_minutes > 59 ? 59 : s_current_minutes);
-  s_current_value = s_tide_values[0] +
-    (int16_t)((int32_t)(s_tide_values[1] - s_tide_values[0]) * frac / 60);
-  s_rising = s_tide_values[1] > s_tide_values[0];
+  int16_t sample = s_current_minutes / 60;
+  int16_t frac = s_current_minutes % 60;
+  if (sample < 0) {
+    sample = 0;
+    frac = 0;
+  }
+  if (sample >= s_tide_count - 1) {
+    sample = s_tide_count - 2;
+    frac = 60;
+  }
+  s_current_value = s_tide_values[sample] +
+    (int16_t)((int32_t)(s_tide_values[sample + 1] - s_tide_values[sample]) * frac / 60);
+  s_rising = s_tide_values[sample + 1] > s_tide_values[sample];
 
-  for (int16_t i = 1; i < s_tide_count - 1; i++) {
+  for (int16_t i = 1; i < s_tide_count - 1 && s_event_count < TIDE_EVENT_COUNT; i++) {
     if (i * 60 <= s_current_minutes) continue;
     bool is_high = prv_is_tide_event(i, true);
-    bool is_low  = prv_is_tide_event(i, false);
+    bool is_low = prv_is_tide_event(i, false);
     if (is_high || is_low) {
-      if (s_next_index < 0) {
-        s_next_index = i;
-        s_next_high  = is_high;
-      } else {
-        s_after_next_index = i;
-        s_after_next_high  = is_high;
-        break;
-      }
+      s_event_indices[s_event_count] = i;
+      s_event_highs[s_event_count] = is_high;
+      s_event_count += 1;
     }
   }
 }
 
-static void prv_set_text(void) {
-  time_t now = time(NULL);
-  strftime(s_time_display, sizeof(s_time_display), prv_clock_format(), localtime(&now));
-  prv_strip_leading_zero(s_time_display);
-  text_layer_set_text(s_time_layer, s_time_display);
-  text_layer_set_text(s_location_layer, s_location);
-
-  if (s_tide_count < 2) {
-    text_layer_set_text(s_hero_layer, "--:--");
-    s_countdown_prefix[0] = '\0';
-    s_now_prefix[0] = '\0';
-    layer_mark_dirty(s_event_label_layer);
-    layer_mark_dirty(s_countdown_layer);
-    layer_mark_dirty(s_now_row_layer);
-    layer_mark_dirty(s_chart_layer);
-    return;
-  }
-
-  if (s_next_index >= 0) {
-    prv_format_time_for_index(s_hero_text, sizeof(s_hero_text), s_next_index);
-    text_layer_set_text(s_hero_layer, s_hero_text);
-
-    int16_t minutes_to = s_next_index * 60 - s_current_minutes;
-    int16_t h = minutes_to / 60;
-    int16_t m = minutes_to % 60;
-    char ht[16];
-    prv_format_height(ht, sizeof(ht), s_tide_values[s_next_index]);
-    if (h > 0) {
-      snprintf(s_countdown_prefix, sizeof(s_countdown_prefix), "In %dh %02dm  ", h, m);
-    } else {
-      snprintf(s_countdown_prefix, sizeof(s_countdown_prefix), "In %dm  ", m);
-    }
-    snprintf(s_countdown_suffix, sizeof(s_countdown_suffix), "%s", ht);
-  } else {
-    text_layer_set_text(s_hero_layer, "--:--");
-    s_countdown_prefix[0] = '\0';
-  }
-
-  char ht[16];
-  prv_format_height(ht, sizeof(ht), s_current_value);
-  snprintf(s_now_prefix, sizeof(s_now_prefix), "Now %s  ", ht);
-  strncpy(s_now_suffix, s_rising ? "Rising" : "Falling", sizeof(s_now_suffix) - 1);
-
-  layer_mark_dirty(s_event_label_layer);
-  layer_mark_dirty(s_countdown_layer);
-  layer_mark_dirty(s_now_row_layer);
-  layer_mark_dirty(s_chart_layer);
-}
-
-static void prv_draw_countdown(Layer *layer, GContext *ctx) {
-  GRect bounds = layer_get_bounds(layer);
-  if (s_countdown_prefix[0] == '\0') {
-    // No tide data — show status centred in regular gray
-    graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorLightGray));
-    graphics_draw_text(ctx, s_status, s_text_font,
-      GRect(0, 0, bounds.size.w, bounds.size.h),
-      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-    return;
-  }
-  GRect mbox = GRect(0, 0, 200, bounds.size.h);
-  GSize ps = graphics_text_layout_get_content_size(s_countdown_prefix, s_label_font, mbox,
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  GSize ss = graphics_text_layout_get_content_size(s_countdown_suffix, s_now_font, mbox,
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  int16_t x = (bounds.size.w - ps.w - ss.w) / 2;
-  if (x < 2) x = 2;
-  graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorLightGray));
-  graphics_draw_text(ctx, s_countdown_prefix, s_label_font,
-    GRect(x, 0, ps.w + 4, bounds.size.h),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-  graphics_context_set_text_color(ctx, GColorWhite);
-  graphics_draw_text(ctx, s_countdown_suffix, s_now_font,
-    GRect(x + ps.w, 0, ss.w + 8, bounds.size.h),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-}
-
-// Draw a filled triangle. For "up": tip at (x + ARROW_W/2, y). For "down": tip at (x + ARROW_W/2, y + ARROW_H).
 static void prv_draw_arrow(GContext *ctx, bool up, int16_t x, int16_t y) {
   GPath *path = up ? s_arrow_up_path : s_arrow_down_path;
   gpath_move_to(path, GPoint(x, y));
   gpath_draw_filled(ctx, path);
 }
 
-// Draw a chart marker: green circle for HIGH, red downward triangle (tip at px,py) for LOW.
-static void prv_draw_chart_event(GContext *ctx, bool high, int16_t px, int16_t py) {
-  if (high) {
-    graphics_context_set_fill_color(ctx, COLOR_HIGH);
-    graphics_fill_circle(ctx, GPoint(px, py), 3);
-  } else {
-    graphics_context_set_fill_color(ctx, COLOR_LOW);
-    // Triangle tip at (px, py): origin is tip_x - ARROW_W/2, tip_y - ARROW_H
-    prv_draw_arrow(ctx, false, px - ARROW_W / 2, py - ARROW_H);
+static void prv_draw_text(GContext *ctx, const char *text, GFont font, GRect rect,
+                          GColor color, GTextAlignment alignment) {
+  graphics_context_set_text_color(ctx, color);
+  graphics_draw_text(ctx, text, font, rect, GTextOverflowModeTrailingEllipsis, alignment, NULL);
+}
+
+static void prv_draw_page_dots(GContext *ctx, GRect bounds) {
+  int16_t x = bounds.size.w - 6;
+  int16_t y = bounds.size.h / 2 - 25;
+  for (int16_t i = 0; i < TidePageCount; i++) {
+    graphics_context_set_fill_color(ctx, i == s_page ? GColorWhite : COLOR_DIM);
+    graphics_fill_circle(ctx, GPoint(x, y + i * 14), 3);
   }
 }
 
-static void prv_draw_event_row(Layer *layer, GContext *ctx) {
-  GRect bounds = layer_get_bounds(layer);
-  if (s_tide_count < 2 || s_next_index < 0) return;
-
-  const char *label = s_next_high ? " NEXT HIGH" : " NEXT LOW";
-  GColor color = s_next_high ? COLOR_HIGH : COLOR_LOW;
-
-  GSize text_size = graphics_text_layout_get_content_size(label, s_label_font,
-    GRect(0, 0, 200, bounds.size.h), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  int16_t total_w = ARROW_W + text_size.w;
-  int16_t x = (bounds.size.w - total_w) / 2;
-  int16_t arrow_y = (bounds.size.h - ARROW_H) / 2;
-
-  graphics_context_set_fill_color(ctx, color);
-  prv_draw_arrow(ctx, s_next_high, x, arrow_y);
-
-  graphics_context_set_text_color(ctx, color);
-  graphics_draw_text(ctx, label, s_label_font,
-    GRect(x + ARROW_W, 0, text_size.w + 4, bounds.size.h),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+static void prv_draw_chart_event(GContext *ctx, bool high, int16_t px, int16_t py) {
+  graphics_context_set_fill_color(ctx, high ? COLOR_HIGH : COLOR_LOW);
+  prv_draw_arrow(ctx, high, px - ARROW_W / 2, high ? py : py - ARROW_H);
 }
 
-static void prv_draw_chart(Layer *layer, GContext *ctx) {
-  GRect bounds = layer_get_bounds(layer);
-  const int16_t mx = 2, my = 2;
-  const int16_t w = bounds.size.w - mx * 2;
-  const int16_t h = bounds.size.h - my * 2;
+static void prv_draw_chart_event_label(GContext *ctx, bool high, const char *text,
+                                       int16_t center_x, int16_t y, GColor color,
+                                       GRect frame) {
+  const int16_t label_w = 44;
+  int16_t x = center_x - label_w / 2;
+  if (x < frame.origin.x + 1) x = frame.origin.x + 1;
+  if (x > frame.origin.x + frame.size.w - label_w - 1) {
+    x = frame.origin.x + frame.size.w - label_w - 1;
+  }
+
+  graphics_context_set_fill_color(ctx, color);
+  prv_draw_arrow(ctx, high, x, y + 6);
+  prv_draw_text(ctx, text, s_chart_font,
+    GRect(x + ARROW_W + 2, y, label_w - ARROW_W - 2, 22), color, GTextAlignmentLeft);
+}
+
+static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
+  const int16_t mx = 6, my = 6;
+  const int16_t w = frame.size.w - mx * 2;
+  const int16_t h = frame.size.h - my * 2;
+  const int16_t label_h = labels ? 22 : 0;
+  const int16_t plot_y = frame.origin.y + my + label_h;
+  int16_t plot_h = h - label_h * 2;
+  if (plot_h < 10) plot_h = 10;
 
   if (s_tide_count < 2) {
-    graphics_context_set_stroke_color(ctx, GColorDarkGray);
-    graphics_draw_rect(ctx, GRect(mx, my, w, h));
+    graphics_context_set_stroke_color(ctx, COLOR_DIM);
+    graphics_draw_rect(ctx, GRect(frame.origin.x + mx, frame.origin.y + my, w, h));
     return;
   }
 
@@ -294,111 +266,234 @@ static void prv_draw_chart(Layer *layer, GContext *ctx) {
   }
   if (max_v == min_v) max_v += 1;
 
-  // Tide sparkline (3px thick)
-  graphics_context_set_stroke_color(ctx, PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorWhite));
-  GPoint prev = GPoint(mx, my + h);
+  int16_t axis_y = plot_y + plot_h / 2;
+  graphics_context_set_stroke_color(ctx, COLOR_DIM);
+  graphics_draw_line(ctx, GPoint(frame.origin.x + mx, axis_y),
+    GPoint(frame.origin.x + mx + w, axis_y));
+
+  graphics_context_set_stroke_color(ctx, COLOR_BLUE_LINE);
+  GPoint prev = GPoint(frame.origin.x + mx, plot_y + plot_h);
   for (int16_t i = 0; i < s_tide_count; i++) {
-    int16_t x = mx + (w * i / (s_tide_count - 1));
-    int16_t y = my + h - ((s_tide_values[i] - min_v) * h / (max_v - min_v));
+    int16_t x = frame.origin.x + mx + (w * i / (s_tide_count - 1));
+    int16_t y = plot_y + plot_h -
+      ((s_tide_values[i] - min_v) * plot_h / (max_v - min_v));
     GPoint pt = GPoint(x, y);
     if (i > 0) {
+      graphics_draw_line(ctx, GPoint(prev.x, prev.y - 2), GPoint(pt.x, pt.y - 2));
       graphics_draw_line(ctx, GPoint(prev.x, prev.y - 1), GPoint(pt.x, pt.y - 1));
       graphics_draw_line(ctx, prev, pt);
       graphics_draw_line(ctx, GPoint(prev.x, prev.y + 1), GPoint(pt.x, pt.y + 1));
+      graphics_draw_line(ctx, GPoint(prev.x, prev.y + 2), GPoint(pt.x, pt.y + 2));
     }
     prev = pt;
   }
 
-  // Current position
-  int16_t frac = s_current_minutes < 0 ? 0 : (s_current_minutes > 59 ? 59 : s_current_minutes);
-  int16_t cx = mx + (w * frac / (60 * (s_tide_count - 1)));
-  int16_t cy = my + h - ((s_current_value - min_v) * h / (max_v - min_v));
-
-  // Vertical "now" line from dot up to top of chart
+  int16_t cx = frame.origin.x + mx + prv_current_sample_x(w);
+  int16_t cy = plot_y + plot_h -
+    ((s_current_value - min_v) * plot_h / (max_v - min_v));
   graphics_context_set_stroke_color(ctx, COLOR_NOW);
-  if (cy > my + 5) {
-    graphics_draw_line(ctx, GPoint(cx, my), GPoint(cx, cy - 5));
+  if (cy > plot_y + 5) {
+    graphics_draw_line(ctx, GPoint(cx, plot_y), GPoint(cx, cy - 5));
   }
-
-  // Teal halo + teal dot
   graphics_context_set_fill_color(ctx, COLOR_NOW_HALO);
-  graphics_fill_circle(ctx, GPoint(cx, cy), 5);
+  graphics_fill_circle(ctx, GPoint(cx, cy), 6);
   graphics_context_set_fill_color(ctx, COLOR_NOW);
-  graphics_fill_circle(ctx, GPoint(cx, cy), 3);
+  graphics_fill_circle(ctx, GPoint(cx, cy), 4);
 
-  // Next event marker (green circle HIGH, red ▼ tip-at-curve for LOW)
-  if (s_next_index >= 0) {
-    int16_t ex = mx + (w * s_next_index / (s_tide_count - 1));
-    int16_t ey = my + h - ((s_tide_values[s_next_index] - min_v) * h / (max_v - min_v));
-    prv_draw_chart_event(ctx, s_next_high, ex, ey);
-  }
+  for (int16_t e = 0; e < s_event_count; e++) {
+    int16_t index = s_event_indices[e];
+    int16_t ex = frame.origin.x + mx + (w * index / (s_tide_count - 1));
+    int16_t ey = plot_y + plot_h -
+      ((s_tide_values[index] - min_v) * plot_h / (max_v - min_v));
+    prv_draw_chart_event(ctx, s_event_highs[e], ex, ey);
 
-  // Tide-after-next marker + time label
-  if (s_after_next_index >= 0) {
-    int16_t ax = mx + (w * s_after_next_index / (s_tide_count - 1));
-    int16_t ay = my + h - ((s_tide_values[s_after_next_index] - min_v) * h / (max_v - min_v));
-    prv_draw_chart_event(ctx, s_after_next_high, ax, ay);
-
-    // Time label placed at the opposite end of the chart from the event
-    char after_time[6];
-    prv_format_time_for_index(after_time, sizeof(after_time), s_after_next_index);
-    GColor label_color = s_after_next_high ? COLOR_HIGH : COLOR_LOW;
-    // Use bold label font; size the box to fit it on each platform
-    const int16_t label_w = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-      52, 52, 52, 52, 68, 68, 52);
-    const int16_t label_h = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-      22, 22, 22, 22, 28, 28, 22);
-    int16_t lx = ax - label_w / 2;
-    if (lx < mx) lx = mx;
-    if (lx > mx + w - label_w) lx = mx + w - label_w;
-    int16_t ly = s_after_next_high ? my + h - label_h - 2 : my + 2;
-    // Line from peak/trough to label centre
-    graphics_context_set_stroke_color(ctx, label_color);
-    graphics_draw_line(ctx, GPoint(ax, ay), GPoint(lx + label_w / 2, ly + label_h / 2));
-    GRect label_box = GRect(lx, ly, label_w, label_h);
-    graphics_context_set_text_color(ctx, label_color);
-    graphics_draw_text(ctx, after_time, s_label_font,
-      label_box,
-      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    if (!labels) continue;
+    char event_time[6];
+    prv_format_time_for_index(event_time, sizeof(event_time), index);
+    GColor label_color = s_event_highs[e] ? COLOR_HIGH : COLOR_LOW;
+    int16_t ly = s_event_highs[e] ? frame.origin.y + my : plot_y + plot_h + 1;
+    prv_draw_chart_event_label(ctx, s_event_highs[e], event_time, ex, ly, label_color, frame);
   }
 }
 
-static void prv_draw_now_row(Layer *layer, GContext *ctx) {
-  GRect bounds = layer_get_bounds(layer);
-  if (s_now_prefix[0] == '\0') return;
+static void prv_draw_event_heading(GContext *ctx, GRect frame, const char *prefix,
+                                   bool high, GFont font) {
+  GColor color = high ? COLOR_HIGH : COLOR_LOW;
+  char label[24];
+  snprintf(label, sizeof(label), "%s %s", prefix, high ? "HIGH" : "LOW");
+  graphics_context_set_fill_color(ctx, color);
+  prv_draw_arrow(ctx, high, frame.origin.x, frame.origin.y + 8);
+  prv_draw_text(ctx, label, font,
+    GRect(frame.origin.x + ARROW_W + 4, frame.origin.y, frame.size.w - ARROW_W - 4, 26),
+    color, GTextAlignmentLeft);
+}
 
-  GRect measure_box = GRect(0, 0, 200, bounds.size.h);
-  GSize ps = graphics_text_layout_get_content_size(s_now_prefix, s_now_font, measure_box,
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  GSize ss = graphics_text_layout_get_content_size(s_now_suffix, s_now_font, measure_box,
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+static void prv_draw_card_background(GContext *ctx, GRect frame, GColor fill, GColor stripe) {
+  graphics_context_set_fill_color(ctx, fill);
+  graphics_fill_rect(ctx, frame, 8, GCornersAll);
+  graphics_context_set_fill_color(ctx, stripe);
+  graphics_fill_rect(ctx, GRect(frame.origin.x, frame.origin.y, 8, frame.size.h), 8,
+    GCornersLeft);
+}
 
-  int16_t total_w = ps.w + ARROW_W + 4 + ss.w;
-  int16_t x = (bounds.size.w - total_w) / 2;
-  if (x < 2) x = 2;
-  int16_t arrow_y = (bounds.size.h - ARROW_H) / 2;
+static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number,
+                                const char *prefix, EventCardLayout layout) {
+  if (event_number >= s_event_count) {
+    prv_draw_text(ctx, s_status, s_text_font, frame, COLOR_MUTED, GTextAlignmentCenter);
+    return;
+  }
 
-  GColor trend_color = s_rising ? COLOR_NOW : COLOR_LOW;
+  int16_t index = s_event_indices[event_number];
+  bool high = s_event_highs[event_number];
+  GColor color = high ? COLOR_HIGH : COLOR_LOW;
+  GColor card = high ? COLOR_HIGH_CARD : COLOR_LOW_CARD;
+  char time_text[8], height_text[16], countdown_text[20], detail_text[48];
 
-  graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorLightGray));
-  graphics_draw_text(ctx, s_now_prefix, s_now_font,
-    GRect(x, 0, ps.w + 4, bounds.size.h),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  prv_format_time_for_index(time_text, sizeof(time_text), index);
+  prv_format_height(height_text, sizeof(height_text), s_tide_values[index]);
+  prv_format_minutes_to(countdown_text, sizeof(countdown_text), index);
+  snprintf(detail_text, sizeof(detail_text), "%s - %s", countdown_text, height_text);
 
+  prv_draw_card_background(ctx, frame, card, color);
+  int16_t x = frame.origin.x + 18;
+  int16_t y = frame.origin.y + (layout == EventCardLayoutLarge ? 8 : 0);
+  prv_draw_event_heading(ctx, GRect(x, y, frame.size.w - 24, 28), prefix, high, s_label_font);
+
+  GFont time_font = layout == EventCardLayoutLarge ? s_large_time_font : s_compact_time_font;
+  GFont detail_font = layout == EventCardLayoutSmall ? s_chart_font : s_text_font;
+  int16_t time_h = layout == EventCardLayoutLarge ? 72 : 34;
+  int16_t time_y;
+  int16_t detail_h = layout == EventCardLayoutSmall ? 22 : 28;
+  int16_t detail_y = frame.origin.y + frame.size.h -
+    (layout == EventCardLayoutSmall ? 24 : 31);
+  if (layout == EventCardLayoutLarge) {
+    time_y = frame.origin.y + 46;
+  } else if (layout == EventCardLayoutNext) {
+    int16_t heading_center = frame.origin.y + 14;
+    int16_t detail_center = detail_y + detail_h / 2;
+    int16_t time_center = heading_center + (detail_center - heading_center) / 2;
+    time_y = time_center - time_h / 2;
+  } else {
+    time_y = frame.origin.y + 20;
+  }
+  prv_draw_text(ctx, time_text, time_font,
+    GRect(x, time_y, frame.size.w - 24, time_h), GColorWhite, GTextAlignmentLeft);
+  prv_draw_text(ctx, detail_text, detail_font,
+    GRect(x, detail_y, frame.size.w - 24, detail_h), COLOR_MUTED, GTextAlignmentLeft);
+}
+
+static void prv_draw_now_card(GContext *ctx, GRect frame) {
+  char height_text[16];
+  prv_format_height(height_text, sizeof(height_text), s_current_value);
+
+  prv_draw_card_background(ctx, frame, COLOR_NOW_CARD, COLOR_NOW);
+  int16_t x = frame.origin.x + 18;
+  int16_t header_y = frame.origin.y + PAGE_MARGIN;
+  int16_t header_h = 28;
+  prv_draw_text(ctx, "NOW", s_label_font, GRect(x, header_y, 52, header_h),
+    COLOR_NOW, GTextAlignmentLeft);
+
+  GColor trend_color = s_rising ? COLOR_HIGH : COLOR_LOW;
   graphics_context_set_fill_color(ctx, trend_color);
-  prv_draw_arrow(ctx, s_rising, x + ps.w, arrow_y);
+  prv_draw_arrow(ctx, s_rising, x + 58, header_y + 9);
+  prv_draw_text(ctx, s_rising ? "Rising" : "Falling", s_label_font,
+    GRect(x + 70, header_y, frame.size.w - 88, header_h), trend_color, GTextAlignmentLeft);
+  int16_t value_y = header_y + header_h;
+  int16_t value_h = frame.size.h - PAGE_MARGIN - (value_y - frame.origin.y);
+  prv_draw_text(ctx, height_text, s_hero_font,
+    GRect(x, value_y + (value_h - 52) / 2, frame.size.w - 24, 64),
+    GColorWhite, GTextAlignmentLeft);
+}
 
-  graphics_context_set_text_color(ctx, trend_color);
-  graphics_draw_text(ctx, s_now_suffix, s_now_font,
-    GRect(x + ps.w + ARROW_W + 4, 0, ss.w + 8, bounds.size.h),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+static void prv_draw_now_next_page(GContext *ctx, GRect bounds) {
+  int16_t content_w = bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W;
+  int16_t top_margin = 3;
+  int16_t bottom_margin = PAGE_MARGIN;
+  int16_t now_h = 84;
+  GRect now_card = GRect(PAGE_MARGIN, top_margin, content_w, now_h);
+  GRect next_card = GRect(PAGE_MARGIN, top_margin + now_h + CARD_GAP, content_w,
+    bounds.size.h - top_margin - bottom_margin - now_h - CARD_GAP);
+  prv_draw_now_card(ctx, now_card);
+  prv_draw_event_card(ctx, next_card, 0, "NEXT", EventCardLayoutNext);
+}
+
+static void prv_draw_then_page(GContext *ctx, GRect bounds) {
+  GRect card = GRect(PAGE_MARGIN, PAGE_MARGIN, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
+    bounds.size.h - PAGE_MARGIN * 2);
+  prv_draw_event_card(ctx, card, 1, "THEN", EventCardLayoutLarge);
+}
+
+static void prv_draw_later_page(GContext *ctx, GRect bounds) {
+  const int16_t title_h = 20;
+  const int16_t title_gap = 3;
+  prv_draw_text(ctx, "LATER", s_label_font,
+    GRect(0, 0, bounds.size.w - PAGE_DOTS_W / 2, title_h),
+    COLOR_MUTED, GTextAlignmentCenter);
+  int16_t content_w = bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W;
+  int16_t cards_y = title_h + title_gap;
+  int16_t card_h = (bounds.size.h - cards_y - PAGE_MARGIN - CARD_GAP) / 2;
+  prv_draw_event_card(ctx, GRect(PAGE_MARGIN, cards_y, content_w, card_h), 2, "",
+    EventCardLayoutSmall);
+  prv_draw_event_card(ctx, GRect(PAGE_MARGIN, cards_y + card_h + CARD_GAP, content_w, card_h),
+    3, "", EventCardLayoutSmall);
+}
+
+static void prv_draw_overview_page(GContext *ctx, GRect bounds) {
+  prv_draw_text(ctx, "OVERVIEW", s_label_font,
+    GRect(6, 0, bounds.size.w / 2, 28), COLOR_MUTED, GTextAlignmentLeft);
+  prv_draw_text(ctx, "NEXT 24H", s_label_font,
+    GRect(bounds.size.w / 2 - 2, 0, bounds.size.w / 2 - 18, 28), COLOR_DIM,
+    GTextAlignmentRight);
+  prv_draw_chart(ctx, GRect(2, 30, bounds.size.w - 18, bounds.size.h - 36), true);
+}
+
+static void prv_draw_empty_page(GContext *ctx, GRect bounds) {
+  prv_draw_text(ctx, s_status, s_text_font,
+    GRect(10, bounds.size.h / 2 - 24, bounds.size.w - 20, 48), COLOR_MUTED,
+    GTextAlignmentCenter);
+}
+
+static void prv_content_update_proc(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+  if (s_tide_count < 2) {
+    prv_draw_empty_page(ctx, bounds);
+    prv_draw_page_dots(ctx, bounds);
+    return;
+  }
+
+  switch (s_page) {
+    case TidePageOverview:
+      prv_draw_overview_page(ctx, bounds);
+      break;
+    case TidePageNowNext:
+      prv_draw_now_next_page(ctx, bounds);
+      break;
+    case TidePageThen:
+      prv_draw_then_page(ctx, bounds);
+      break;
+    case TidePageLater:
+      prv_draw_later_page(ctx, bounds);
+      break;
+    default:
+      break;
+  }
+  prv_draw_page_dots(ctx, bounds);
+}
+
+static void prv_set_text(void) {
+  time_t now = time(NULL);
+  strftime(s_time_display, sizeof(s_time_display), prv_clock_format(), localtime(&now));
+  prv_strip_leading_zero(s_time_display);
+  text_layer_set_text(s_time_layer, s_time_display);
+  text_layer_set_text(s_location_layer, s_location);
+  layer_mark_dirty(s_content_layer);
 }
 
 static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
-  Tuple *location       = dict_find(iterator, MESSAGE_KEY_tide_location);
-  Tuple *status         = dict_find(iterator, MESSAGE_KEY_tide_status);
-  Tuple *sample_offset  = dict_find(iterator, MESSAGE_KEY_tide_sample_offset);
-  Tuple *values         = dict_find(iterator, MESSAGE_KEY_tide_values);
+  Tuple *location = dict_find(iterator, MESSAGE_KEY_tide_location);
+  Tuple *status = dict_find(iterator, MESSAGE_KEY_tide_status);
+  Tuple *sample_offset = dict_find(iterator, MESSAGE_KEY_tide_sample_offset);
+  Tuple *values = dict_find(iterator, MESSAGE_KEY_tide_values);
   Tuple *current_minutes = dict_find(iterator, MESSAGE_KEY_tide_current_minutes);
 
   if (location) {
@@ -412,6 +507,9 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
   int16_t offset = 0;
   if (sample_offset) offset = sample_offset->value->int16;
   if (values) {
+    if (offset == 0) {
+      s_tide_count = 0;
+    }
     char value_csv[160];
     strncpy(value_csv, values->value->cstring, sizeof(value_csv) - 1);
     value_csv[sizeof(value_csv) - 1] = '\0';
@@ -425,6 +523,7 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
 }
 
 static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
+  prv_compute_state();
   prv_set_text();
 }
 
@@ -457,6 +556,33 @@ static TextLayer *prv_make_text_layer(GRect frame, GFont font, GTextAlignment al
   return layer;
 }
 
+static void prv_change_page(TidePage page) {
+  s_page = page;
+  layer_mark_dirty(s_content_layer);
+}
+
+static void prv_up_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_page > TidePageOverview) {
+    prv_change_page((TidePage)(s_page - 1));
+  }
+}
+
+static void prv_down_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_page < TidePageLater) {
+    prv_change_page((TidePage)(s_page + 1));
+  }
+}
+
+static void prv_select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  prv_change_page(TidePageNowNext);
+}
+
+static void prv_click_config_provider(void *context) {
+  window_single_click_subscribe(BUTTON_ID_UP, prv_up_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, prv_down_click_handler);
+  window_single_click_subscribe(BUTTON_ID_SELECT, prv_select_click_handler);
+}
+
 static void prv_window_load(Window *window) {
   Layer *root = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(root);
@@ -467,77 +593,34 @@ static void prv_window_load(Window *window) {
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
     FONT_KEY_GOTHIC_18_BOLD));
-  GFont hero_font = fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD);
-  // Countdown text (lighter weight matches the design's gray "in X · ")
+  s_hero_font = fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD);
+  s_large_time_font = fonts_get_system_font(FONT_KEY_ROBOTO_BOLD_SUBSET_49);
+  s_compact_time_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   s_text_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18,
     FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_18));
-  // Bold font for event label row ("▲ NEXT HIGH") and now row
   s_label_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
     FONT_KEY_GOTHIC_18_BOLD));
-  // Small font for in-chart time labels only
   s_chart_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_14, FONT_KEY_GOTHIC_14, FONT_KEY_GOTHIC_14, FONT_KEY_GOTHIC_14,
     FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_14));
-  // Bold font for now row
-  s_now_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
-    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
-    FONT_KEY_GOTHIC_18_BOLD));
 
-  const int16_t header_h    = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-    22, 22, 22, 22, 30, 30, 22);
-  // event_h must fit s_label_font (GOTHIC_18_BOLD ~20px, GOTHIC_24_BOLD ~26px)
-  const int16_t event_h     = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-    22, 22, 22, 22, 28, 28, 22);
-  // BITHAM_42_BOLD renders ~52px on every platform — keep hero_h fixed
-  const int16_t hero_h      = 52;
-  const int16_t countdown_h = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-    22, 22, 22, 22, 28, 28, 22);
-  // now_h must fit s_now_font (GOTHIC_18_BOLD ~20px, GOTHIC_24_BOLD ~26px)
-  const int16_t now_h       = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-    22, 22, 22, 22, 28, 28, 22);
   const int16_t top_pad = PBL_IF_ROUND_ELSE(8, 0);
-
-  int16_t chart_h_raw = sh - top_pad - header_h - event_h - hero_h - countdown_h - now_h;
-  int16_t chart_h = chart_h_raw > 10 ? chart_h_raw : 10;
-
-  int16_t y = top_pad;
+  const int16_t header_h = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+    24, 24, 24, 24, 32, 32, 24);
 
   s_location_layer = prv_make_text_layer(
-    GRect(4, y, sw / 2 - 4, header_h), header_font, GTextAlignmentLeft);
+    GRect(4, top_pad, sw / 2 - 4, header_h), header_font, GTextAlignmentLeft);
   s_time_layer = prv_make_text_layer(
-    GRect(sw / 2, y, sw / 2 - 4, header_h), header_font, GTextAlignmentRight);
-  y += header_h;
-
-  s_event_label_layer = layer_create(GRect(0, y, sw, event_h + 2));
-  layer_set_update_proc(s_event_label_layer, prv_draw_event_row);
-  y += event_h;
-
-  s_hero_layer = prv_make_text_layer(
-    GRect(0, y, sw, hero_h + 6), hero_font, GTextAlignmentCenter);
-  y += hero_h;
-
-  s_countdown_layer = layer_create(GRect(0, y, sw, countdown_h));
-  layer_set_update_proc(s_countdown_layer, prv_draw_countdown);
-  y += countdown_h;
-
-  s_chart_layer = layer_create(GRect(0, y, sw, chart_h));
-  layer_set_update_proc(s_chart_layer, prv_draw_chart);
-  y += chart_h;
-
-  s_now_row_layer = layer_create(GRect(0, y, sw, now_h));
-  layer_set_update_proc(s_now_row_layer, prv_draw_now_row);
+    GRect(sw / 2, top_pad, sw / 2 - 4, header_h), header_font, GTextAlignmentRight);
+  s_content_layer = layer_create(GRect(0, top_pad + header_h, sw, sh - top_pad - header_h));
+  layer_set_update_proc(s_content_layer, prv_content_update_proc);
 
   layer_add_child(root, text_layer_get_layer(s_location_layer));
   layer_add_child(root, text_layer_get_layer(s_time_layer));
-  layer_add_child(root, s_event_label_layer);
-  layer_add_child(root, text_layer_get_layer(s_hero_layer));
-  layer_add_child(root, s_countdown_layer);
-  layer_add_child(root, s_chart_layer);
-  layer_add_child(root, s_now_row_layer);
+  layer_add_child(root, s_content_layer);
 
   prv_compute_state();
   prv_set_text();
@@ -546,21 +629,18 @@ static void prv_window_load(Window *window) {
 static void prv_window_unload(Window *window) {
   text_layer_destroy(s_location_layer);
   text_layer_destroy(s_time_layer);
-  layer_destroy(s_event_label_layer);
-  text_layer_destroy(s_hero_layer);
-  layer_destroy(s_countdown_layer);
-  layer_destroy(s_chart_layer);
-  layer_destroy(s_now_row_layer);
+  layer_destroy(s_content_layer);
 }
 
 static void prv_init(void) {
-  s_arrow_up_path   = gpath_create(&s_arrow_up_info);
+  s_arrow_up_path = gpath_create(&s_arrow_up_info);
   s_arrow_down_path = gpath_create(&s_arrow_down_info);
 
   s_window = window_create();
   window_set_background_color(s_window, GColorBlack);
+  window_set_click_config_provider(s_window, prv_click_config_provider);
   window_set_window_handlers(s_window, (WindowHandlers) {
-    .load   = prv_window_load,
+    .load = prv_window_load,
     .unload = prv_window_unload,
   });
   window_stack_push(s_window, true);
