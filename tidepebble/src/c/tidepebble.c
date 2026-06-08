@@ -226,7 +226,7 @@ static void prv_draw_page_dots(GContext *ctx, GRect bounds) {
 
 static void prv_draw_chart_event(GContext *ctx, bool high, int16_t px, int16_t py) {
   graphics_context_set_fill_color(ctx, high ? COLOR_HIGH : COLOR_LOW);
-  prv_draw_arrow(ctx, high, px - ARROW_W / 2, high ? py - 12 : py + 3);
+  prv_draw_arrow(ctx, high, px - ARROW_W / 2, high ? py + 4 : py - ARROW_H - 4);
 }
 
 static void prv_draw_chart_event_label(GContext *ctx, const char *text,
@@ -342,7 +342,6 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   int16_t index = s_event_indices[event_number];
   bool high = s_event_highs[event_number];
   GColor color = high ? COLOR_HIGH : COLOR_LOW;
-  GColor card = high ? COLOR_HIGH_CARD : COLOR_LOW_CARD;
   char time_text[8], height_text[16], countdown_text[20], detail_text[48];
 
   prv_format_time_for_index(time_text, sizeof(time_text), index);
@@ -350,7 +349,7 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   prv_format_minutes_to(countdown_text, sizeof(countdown_text), index);
   snprintf(detail_text, sizeof(detail_text), "%s %s", countdown_text, height_text);
 
-  prv_draw_card_background(ctx, frame, card, color);
+  prv_draw_card_background(ctx, frame, GColorBlack, color);
   int16_t x = frame.origin.x + 18;
   int16_t y = frame.origin.y + (layout == EventCardLayoutLarge ? 8 : 0);
   prv_draw_event_heading(ctx, GRect(x, y, frame.size.w - 24, 28), prefix, high, s_label_font);
@@ -382,7 +381,7 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   char height_text[16];
   prv_format_height(height_text, sizeof(height_text), s_current_value);
 
-  prv_draw_card_background(ctx, frame, COLOR_NOW_CARD, COLOR_NOW);
+  prv_draw_card_background(ctx, frame, GColorBlack, COLOR_NOW);
   int16_t x = frame.origin.x + 18;
   int16_t header_y = frame.origin.y + PAGE_MARGIN;
   int16_t header_h = 28;
@@ -448,8 +447,30 @@ static void prv_draw_empty_page(GContext *ctx, GRect bounds) {
     GTextAlignmentCenter);
 }
 
+static GColor prv_page_background_color(void) {
+  if (s_page == TidePageNowNext) {
+    return COLOR_NOW_CARD;
+  }
+  if (s_page == TidePageThen && s_event_count > 1) {
+    return s_event_highs[1] ? COLOR_HIGH_CARD : COLOR_LOW_CARD;
+  }
+  if (s_page == TidePageLater && s_event_count > 2) {
+    return s_event_highs[2] ? COLOR_HIGH_CARD : COLOR_LOW_CARD;
+  }
+  return GColorBlack;
+}
+
+static void prv_apply_page_background(void) {
+  if (s_window) {
+    window_set_background_color(s_window, prv_page_background_color());
+  }
+}
+
 static void prv_content_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
+  graphics_context_set_fill_color(ctx, prv_page_background_color());
+  graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+
   if (s_tide_count < 2) {
     prv_draw_empty_page(ctx, bounds);
     prv_draw_page_dots(ctx, bounds);
@@ -481,6 +502,7 @@ static void prv_set_text(void) {
   prv_strip_leading_zero(s_time_display);
   text_layer_set_text(s_time_layer, s_time_display);
   text_layer_set_text(s_location_layer, s_location);
+  prv_apply_page_background();
   layer_mark_dirty(s_content_layer);
 }
 
@@ -555,6 +577,7 @@ static TextLayer *prv_make_text_layer(GRect frame, GFont font, GTextAlignment al
 
 static void prv_change_page(TidePage page) {
   s_page = page;
+  prv_apply_page_background();
   layer_mark_dirty(s_content_layer);
 }
 
