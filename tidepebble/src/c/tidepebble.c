@@ -433,20 +433,20 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   int16_t row_h = 30;
   int16_t row_y = value_y + (value_h - row_h) / 2;
   int16_t avail_w = frame.size.w - 18;
-  GSize w1 = graphics_text_layout_get_content_size(height_text, s_large_detail_font,
+  GSize w1 = graphics_text_layout_get_content_size(temp_text, s_large_detail_font,
     GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
   GSize w2 = graphics_text_layout_get_content_size(wave_text, s_large_detail_font,
     GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  GSize w3 = graphics_text_layout_get_content_size(temp_text, s_large_detail_font,
+  GSize w3 = graphics_text_layout_get_content_size(height_text, s_large_detail_font,
     GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
   int16_t gap = (avail_w - w1.w - w2.w - w3.w) / 2;
   if (gap < 0) gap = 0;
-  prv_draw_text(ctx, height_text, s_large_detail_font,
-    GRect(x, row_y, w1.w, row_h), GColorWhite, GTextAlignmentLeft);
+  prv_draw_text(ctx, temp_text, s_large_detail_font,
+    GRect(x, row_y, w1.w, row_h), COLOR_MUTED, GTextAlignmentLeft);
   prv_draw_text(ctx, wave_text, s_large_detail_font,
     GRect(x + w1.w + gap, row_y, w2.w, row_h), COLOR_MUTED, GTextAlignmentLeft);
-  prv_draw_text(ctx, temp_text, s_large_detail_font,
-    GRect(x + w1.w + gap + w2.w + gap, row_y, w3.w, row_h), COLOR_MUTED, GTextAlignmentLeft);
+  prv_draw_text(ctx, height_text, s_large_detail_font,
+    GRect(x + w1.w + gap + w2.w + gap, row_y, w3.w, row_h), GColorWhite, GTextAlignmentLeft);
 }
 
 static void prv_draw_now_next_page(GContext *ctx, GRect bounds) {
