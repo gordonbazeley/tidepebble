@@ -27,7 +27,9 @@
       "tide_current_minutes",
       "tide_sample_offset",
       "tide_values",
-      "tide_times"
+      "tide_times",
+      "tide_wave_height",
+      "tide_sea_temp"
     ],
     "capabilities": ["configurable", "location"],
     "resources": {

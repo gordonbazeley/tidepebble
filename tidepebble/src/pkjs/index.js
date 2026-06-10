@@ -140,7 +140,7 @@
     var url = MARINE_API +
       '?latitude=' + encodeURIComponent(latitude) +
       '&longitude=' + encodeURIComponent(longitude) +
-      '&hourly=sea_level_height_msl' +
+      '&hourly=sea_level_height_msl,swell_wave_height,sea_surface_temperature' +
       '&forecast_days=2' +
       '&timezone=auto';
 
@@ -156,8 +156,12 @@
         var data = JSON.parse(request.responseText);
         var times = data.hourly.time;
         var heights = data.hourly.sea_level_height_msl;
+        var swellHeights = data.hourly.swell_wave_height;
+        var seaTemps = data.hourly.sea_surface_temperature;
         var start = Math.max(0, findFirstCurrentHour(times) - 1);
         var currentMinutes = Math.round((Date.now() - new Date(times[start]).getTime()) / 60000);
+        var waveH = swellHeights && swellHeights[start] != null ? swellHeights[start] : 0;
+        var seaT = seaTemps && seaTemps[start] != null ? seaTemps[start] : 0;
         var values = [];
         for (var i = start; i < times.length && values.length < HOURS_TO_SEND; i += 1) {
           if (heights[i] === null || typeof heights[i] === 'undefined') {
@@ -179,7 +183,9 @@
         send({
           tide_location: label,
           tide_status: '',
-          tide_current_minutes: currentMinutes
+          tide_current_minutes: currentMinutes,
+          tide_wave_height: Math.round(waveH * 100),
+          tide_sea_temp: Math.round(seaT * 10)
         }, function() {
           setTimeout(function() {
             sendChunkSequence(chunks, 0, currentMinutes, label);

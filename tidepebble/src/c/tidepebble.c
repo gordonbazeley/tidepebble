@@ -45,6 +45,8 @@ static bool s_event_highs[TIDE_EVENT_COUNT];
 static int16_t s_event_count;
 static bool s_rising = true;
 static int16_t s_current_value = 0;
+static int16_t s_wave_height = 0;
+static int16_t s_sea_temp = 0;
 static char s_time_display[6] = "--:--";
 static GFont s_text_font;
 static GFont s_label_font;
@@ -127,8 +129,29 @@ static void prv_format_height(char *buffer, size_t buffer_size, int16_t value) {
   }
 
   int32_t feet_tenths = ((int32_t)value * 328084 + (value < 0 ? -500000 : 500000)) / 1000000;
-  snprintf(buffer, buffer_size, "%s%ld.%ldft",
+  snprintf(buffer, buffer_size, "%s%ld.%ld'",
     feet_tenths < 0 ? "-" : "", labs(feet_tenths) / 10, labs(feet_tenths) % 10);
+}
+
+static void prv_format_wave_height(char *buffer, size_t buffer_size, int16_t value_cm) {
+  if (prv_use_metric_units()) {
+    int16_t tenths = (value_cm + 5) / 10;
+    snprintf(buffer, buffer_size, "~%d.%dm", tenths / 10, tenths % 10);
+  } else {
+    int32_t feet_tenths = ((int32_t)value_cm * 328084 + 500000) / 1000000;
+    snprintf(buffer, buffer_size, "~%ld.%ld'", labs(feet_tenths) / 10, labs(feet_tenths) % 10);
+  }
+}
+
+static void prv_format_sea_temp(char *buffer, size_t buffer_size, int16_t value_tenths_c) {
+  if (prv_use_metric_units()) {
+    int16_t c = (value_tenths_c + (value_tenths_c < 0 ? -5 : 5)) / 10;
+    snprintf(buffer, buffer_size, "%d\xc2\xb0", (int)c);
+  } else {
+    int32_t f_tenths = (int32_t)value_tenths_c * 9 / 5 + 320;
+    int16_t f = (int16_t)((f_tenths + 5) / 10);
+    snprintf(buffer, buffer_size, "%d\xc2\xb0", (int)f);
+  }
 }
 
 static const char *prv_clock_format(void) {
@@ -247,7 +270,7 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
   const int16_t my = 6;
   const int16_t w = frame.size.w - mx * 2;
   const int16_t h = frame.size.h - my * 2;
-  const int16_t label_h = labels ? 22 : 0;
+  const int16_t label_h = labels ? 27 : 0;
   const int16_t plot_y = frame.origin.y + my + label_h;
   int16_t plot_h = h - label_h * 2;
   if (plot_h < 10) plot_h = 10;
@@ -290,10 +313,6 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
   int16_t cx = frame.origin.x + mx + prv_current_sample_x(w);
   int16_t cy = plot_y + plot_h -
     ((s_current_value - min_v) * plot_h / (max_v - min_v));
-  graphics_context_set_stroke_color(ctx, COLOR_NOW);
-  if (cy > plot_y + 5) {
-    graphics_draw_line(ctx, GPoint(cx, plot_y), GPoint(cx, cy - 5));
-  }
   graphics_context_set_fill_color(ctx, COLOR_NOW_HALO);
   graphics_fill_circle(ctx, GPoint(cx, cy), 6);
   graphics_context_set_fill_color(ctx, COLOR_NOW);
@@ -310,7 +329,7 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
     char event_time[6];
     prv_format_time_for_index(event_time, sizeof(event_time), index);
     GColor label_color = s_event_highs[e] ? COLOR_HIGH : COLOR_LOW;
-    int16_t ly = s_event_highs[e] ? frame.origin.y + my : plot_y + plot_h + 1;
+    int16_t ly = s_event_highs[e] ? frame.origin.y + my : plot_y + plot_h + 3;
     prv_draw_chart_event_label(ctx, event_time, ex, ly, label_color, frame);
   }
 }
@@ -357,14 +376,12 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   prv_draw_event_heading(ctx, GRect(x, y, frame.size.w - 24, 28), prefix, high, s_label_font);
 
   GFont time_font = layout == EventCardLayoutLarge ? s_large_time_font : s_compact_time_font;
-  GFont detail_font = layout == EventCardLayoutLarge ? s_large_detail_font : s_detail_font;
+  GFont detail_font = layout == EventCardLayoutSmall ? s_detail_font : s_large_detail_font;
   int16_t time_h = layout == EventCardLayoutLarge ? 72 : 34;
   int16_t time_y;
-  int16_t detail_h = layout == EventCardLayoutLarge ? 30 :
-    (layout == EventCardLayoutSmall ? 22 : 28);
+  int16_t detail_h = layout == EventCardLayoutSmall ? 22 : 30;
   int16_t detail_y = frame.origin.y + frame.size.h -
-    (layout == EventCardLayoutLarge ? 34 :
-     (layout == EventCardLayoutSmall ? 24 : 31));
+    (layout == EventCardLayoutSmall ? 24 : 34);
   if (layout == EventCardLayoutLarge) {
     time_y = frame.origin.y + 46;
   } else if (layout == EventCardLayoutNext) {
@@ -377,15 +394,29 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   }
   prv_draw_text(ctx, time_text, time_font,
     GRect(x, time_y, frame.size.w - 24, time_h), GColorWhite, GTextAlignmentLeft);
-  GRect detail_rect = GRect(x, detail_y, frame.size.w - 24, detail_h);
-  prv_draw_text(ctx, countdown_text, detail_font, detail_rect, GColorWhite, GTextAlignmentLeft);
-  prv_draw_text(ctx, "\xe2\x80\xa2", detail_font, detail_rect, color, GTextAlignmentCenter);
-  prv_draw_text(ctx, height_text, detail_font, detail_rect, GColorWhite, GTextAlignmentRight);
+  int16_t avail_w = frame.size.w - 24;
+  GSize dw1 = graphics_text_layout_get_content_size(countdown_text, detail_font,
+    GRect(0, 0, avail_w, detail_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+  GSize dw2 = graphics_text_layout_get_content_size("\xe2\x80\xa2", detail_font,
+    GRect(0, 0, avail_w, detail_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+  GSize dw3 = graphics_text_layout_get_content_size(height_text, detail_font,
+    GRect(0, 0, avail_w, detail_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+  int16_t dgap = (avail_w - dw1.w - dw2.w - dw3.w) / 2;
+  if (dgap < 0) dgap = 0;
+  prv_draw_text(ctx, countdown_text, detail_font,
+    GRect(x, detail_y, dw1.w, detail_h), GColorWhite, GTextAlignmentLeft);
+  prv_draw_text(ctx, "\xe2\x80\xa2", detail_font,
+    GRect(x + dw1.w + dgap, detail_y, dw2.w, detail_h), color, GTextAlignmentLeft);
+  prv_draw_text(ctx, height_text, detail_font,
+    GRect(x + dw1.w + dgap + dw2.w + dgap, detail_y, dw3.w, detail_h),
+    GColorWhite, GTextAlignmentLeft);
 }
 
 static void prv_draw_now_card(GContext *ctx, GRect frame) {
-  char height_text[16];
+  char height_text[16], wave_text[16], temp_text[16];
   prv_format_height(height_text, sizeof(height_text), s_current_value);
+  prv_format_wave_height(wave_text, sizeof(wave_text), s_wave_height);
+  prv_format_sea_temp(temp_text, sizeof(temp_text), s_sea_temp);
 
   prv_draw_card_background(ctx, frame, GColorBlack, COLOR_NOW);
   int16_t x = frame.origin.x + 18;
@@ -399,11 +430,26 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   prv_draw_arrow(ctx, s_rising, x + 58, header_y + 9);
   prv_draw_text(ctx, s_rising ? "Rising" : "Falling", s_label_font,
     GRect(x + 70, header_y, frame.size.w - 88, header_h), trend_color, GTextAlignmentLeft);
+
   int16_t value_y = header_y + header_h;
   int16_t value_h = frame.size.h - PAGE_MARGIN - (value_y - frame.origin.y);
-  prv_draw_text(ctx, height_text, s_hero_font,
-    GRect(x, value_y + (value_h - 52) / 2, frame.size.w - 24, 64),
-    GColorWhite, GTextAlignmentLeft);
+  int16_t row_h = 30;
+  int16_t row_y = value_y + (value_h - row_h) / 2;
+  int16_t avail_w = frame.size.w - 24;
+  GSize w1 = graphics_text_layout_get_content_size(height_text, s_large_detail_font,
+    GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+  GSize w2 = graphics_text_layout_get_content_size(wave_text, s_large_detail_font,
+    GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+  GSize w3 = graphics_text_layout_get_content_size(temp_text, s_large_detail_font,
+    GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+  int16_t gap = (avail_w - w1.w - w2.w - w3.w) / 2;
+  if (gap < 0) gap = 0;
+  prv_draw_text(ctx, height_text, s_large_detail_font,
+    GRect(x, row_y, w1.w, row_h), GColorWhite, GTextAlignmentLeft);
+  prv_draw_text(ctx, wave_text, s_large_detail_font,
+    GRect(x + w1.w + gap, row_y, w2.w, row_h), COLOR_MUTED, GTextAlignmentLeft);
+  prv_draw_text(ctx, temp_text, s_large_detail_font,
+    GRect(x + w1.w + gap + w2.w + gap, row_y, w3.w, row_h), COLOR_MUTED, GTextAlignmentLeft);
 }
 
 static void prv_draw_now_next_page(GContext *ctx, GRect bounds) {
@@ -510,6 +556,8 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
   Tuple *sample_offset = dict_find(iterator, MESSAGE_KEY_tide_sample_offset);
   Tuple *values = dict_find(iterator, MESSAGE_KEY_tide_values);
   Tuple *current_minutes = dict_find(iterator, MESSAGE_KEY_tide_current_minutes);
+  Tuple *wave_height = dict_find(iterator, MESSAGE_KEY_tide_wave_height);
+  Tuple *sea_temp = dict_find(iterator, MESSAGE_KEY_tide_sea_temp);
 
   if (location) {
     strncpy(s_location, location->value->cstring, sizeof(s_location) - 1);
@@ -532,6 +580,8 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
     if (offset + parsed > s_tide_count) s_tide_count = offset + parsed;
   }
   if (current_minutes) s_current_minutes = current_minutes->value->int16;
+  if (wave_height) s_wave_height = wave_height->value->int16;
+  if (sea_temp) s_sea_temp = sea_temp->value->int16;
 
   prv_compute_state();
   prv_set_text();
