@@ -49,6 +49,7 @@ static char s_time_display[6] = "--:--";
 static GFont s_text_font;
 static GFont s_label_font;
 static GFont s_detail_font;
+static GFont s_large_detail_font;
 static GFont s_chart_font;
 static GFont s_overview_label_font;
 static GFont s_hero_font;
@@ -154,10 +155,11 @@ static void prv_format_minutes_to(char *buffer, size_t buffer_size, int16_t inde
   if (minutes_to < 0) minutes_to = 0;
   int16_t h = minutes_to / 60;
   int16_t m = minutes_to % 60;
+  if (m > 30) h += 1;
   if (h > 0) {
-    snprintf(buffer, buffer_size, "in %dh %02dm", h, m);
+    snprintf(buffer, buffer_size, "In %dh", h);
   } else {
-    snprintf(buffer, buffer_size, "in %dm", m);
+    snprintf(buffer, buffer_size, "In <1h");
   }
 }
 
@@ -343,12 +345,11 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   int16_t index = s_event_indices[event_number];
   bool high = s_event_highs[event_number];
   GColor color = high ? COLOR_HIGH : COLOR_LOW;
-  char time_text[8], height_text[16], countdown_text[20], detail_text[48];
+  char time_text[8], height_text[16], countdown_text[20];
 
   prv_format_time_for_index(time_text, sizeof(time_text), index);
   prv_format_height(height_text, sizeof(height_text), s_tide_values[index]);
   prv_format_minutes_to(countdown_text, sizeof(countdown_text), index);
-  snprintf(detail_text, sizeof(detail_text), "%s %s", countdown_text, height_text);
 
   prv_draw_card_background(ctx, frame, GColorBlack, color);
   int16_t x = frame.origin.x + 18;
@@ -356,12 +357,14 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   prv_draw_event_heading(ctx, GRect(x, y, frame.size.w - 24, 28), prefix, high, s_label_font);
 
   GFont time_font = layout == EventCardLayoutLarge ? s_large_time_font : s_compact_time_font;
-  GFont detail_font = s_detail_font;
+  GFont detail_font = layout == EventCardLayoutLarge ? s_large_detail_font : s_detail_font;
   int16_t time_h = layout == EventCardLayoutLarge ? 72 : 34;
   int16_t time_y;
-  int16_t detail_h = layout == EventCardLayoutSmall ? 22 : 28;
+  int16_t detail_h = layout == EventCardLayoutLarge ? 30 :
+    (layout == EventCardLayoutSmall ? 22 : 28);
   int16_t detail_y = frame.origin.y + frame.size.h -
-    (layout == EventCardLayoutSmall ? 24 : 31);
+    (layout == EventCardLayoutLarge ? 34 :
+     (layout == EventCardLayoutSmall ? 24 : 31));
   if (layout == EventCardLayoutLarge) {
     time_y = frame.origin.y + 46;
   } else if (layout == EventCardLayoutNext) {
@@ -374,8 +377,10 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   }
   prv_draw_text(ctx, time_text, time_font,
     GRect(x, time_y, frame.size.w - 24, time_h), GColorWhite, GTextAlignmentLeft);
-  prv_draw_text(ctx, detail_text, detail_font,
-    GRect(x, detail_y, frame.size.w - 24, detail_h), GColorWhite, GTextAlignmentLeft);
+  GRect detail_rect = GRect(x, detail_y, frame.size.w - 24, detail_h);
+  prv_draw_text(ctx, countdown_text, detail_font, detail_rect, GColorWhite, GTextAlignmentLeft);
+  prv_draw_text(ctx, "\xe2\x80\xa2", detail_font, detail_rect, color, GTextAlignmentCenter);
+  prv_draw_text(ctx, height_text, detail_font, detail_rect, GColorWhite, GTextAlignmentRight);
 }
 
 static void prv_draw_now_card(GContext *ctx, GRect frame) {
@@ -420,17 +425,9 @@ static void prv_draw_then_page(GContext *ctx, GRect bounds) {
 }
 
 static void prv_draw_later_page(GContext *ctx, GRect bounds) {
-  const int16_t title_h = 22;
-  prv_draw_text(ctx, "LATER", s_label_font,
-    GRect(0, -9, bounds.size.w - PAGE_DOTS_W / 2, title_h),
-    COLOR_MUTED, GTextAlignmentCenter);
-  int16_t content_w = bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W;
-  int16_t cards_y = 20;
-  int16_t card_h = (bounds.size.h - cards_y - PAGE_MARGIN - CARD_GAP) / 2;
-  prv_draw_event_card(ctx, GRect(PAGE_MARGIN, cards_y, content_w, card_h), 2, "",
-    EventCardLayoutSmall);
-  prv_draw_event_card(ctx, GRect(PAGE_MARGIN, cards_y + card_h + CARD_GAP, content_w, card_h),
-    3, "", EventCardLayoutSmall);
+  GRect card = GRect(PAGE_MARGIN, PAGE_MARGIN, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
+    bounds.size.h - PAGE_MARGIN * 2);
+  prv_draw_event_card(ctx, card, 2, "LATER", EventCardLayoutLarge);
 }
 
 static void prv_draw_overview_page(GContext *ctx, GRect bounds) {
@@ -628,6 +625,10 @@ static void prv_window_load(Window *window) {
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
     FONT_KEY_GOTHIC_18_BOLD));
+  s_large_detail_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+    FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
+    FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_28_BOLD, FONT_KEY_GOTHIC_28_BOLD,
+    FONT_KEY_GOTHIC_24_BOLD));
   s_overview_label_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
