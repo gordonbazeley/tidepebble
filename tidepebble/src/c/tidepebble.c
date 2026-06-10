@@ -136,10 +136,10 @@ static void prv_format_height(char *buffer, size_t buffer_size, int16_t value) {
 static void prv_format_wave_height(char *buffer, size_t buffer_size, int16_t value_cm) {
   if (prv_use_metric_units()) {
     int16_t tenths = (value_cm + 5) / 10;
-    snprintf(buffer, buffer_size, "~%d.%dm", tenths / 10, tenths % 10);
+    snprintf(buffer, buffer_size, "%d.%dm", tenths / 10, tenths % 10);
   } else {
     int32_t feet_tenths = ((int32_t)value_cm * 328084 + 500000) / 1000000;
-    snprintf(buffer, buffer_size, "~%ld.%ld'", labs(feet_tenths) / 10, labs(feet_tenths) % 10);
+    snprintf(buffer, buffer_size, "%ld.%ld'", labs(feet_tenths) / 10, labs(feet_tenths) % 10);
   }
 }
 
@@ -409,6 +409,21 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
     GColorWhite, GTextAlignmentLeft);
 }
 
+#define WAVE_ICON_W 16
+#define WAVE_ICON_H 10
+static void prv_draw_wave_icon(GContext *ctx, GPoint origin, GColor color) {
+  static const GPoint pts[] = {
+    {0, 5}, {2, 2}, {4, 0}, {6, 2}, {8, 5}, {10, 8}, {12, 10}, {14, 8}, {16, 5}
+  };
+  graphics_context_set_stroke_color(ctx, color);
+  graphics_context_set_stroke_width(ctx, 2);
+  for (int i = 0; i < 8; i++) {
+    graphics_draw_line(ctx,
+      GPoint(origin.x + pts[i].x, origin.y + pts[i].y),
+      GPoint(origin.x + pts[i + 1].x, origin.y + pts[i + 1].y));
+  }
+}
+
 static void prv_draw_now_card(GContext *ctx, GRect frame) {
   char height_text[16], wave_text[16], temp_text[16];
   prv_format_height(height_text, sizeof(height_text), s_current_value);
@@ -433,20 +448,24 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   int16_t row_h = 30;
   int16_t row_y = value_y + (value_h - row_h) / 2;
   int16_t avail_w = frame.size.w - 18;
+  int16_t icon_gap = 3;
   GSize w1 = graphics_text_layout_get_content_size(temp_text, s_large_detail_font,
     GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  GSize w2 = graphics_text_layout_get_content_size(wave_text, s_large_detail_font,
+  GSize w2_text = graphics_text_layout_get_content_size(wave_text, s_large_detail_font,
     GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+  int16_t w2 = WAVE_ICON_W + icon_gap + w2_text.w;
   GSize w3 = graphics_text_layout_get_content_size(height_text, s_large_detail_font,
     GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  int16_t gap = (avail_w - w1.w - w2.w - w3.w) / 2;
+  int16_t gap = (avail_w - w1.w - w2 - w3.w) / 2;
   if (gap < 0) gap = 0;
   prv_draw_text(ctx, temp_text, s_large_detail_font,
-    GRect(x, row_y, w1.w, row_h), COLOR_MUTED, GTextAlignmentLeft);
+    GRect(x, row_y, w1.w, row_h), GColorWhite, GTextAlignmentLeft);
+  int16_t wave_x = x + w1.w + gap;
+  prv_draw_wave_icon(ctx, GPoint(wave_x, row_y + (row_h - WAVE_ICON_H) / 2 + 5), GColorWhite);
   prv_draw_text(ctx, wave_text, s_large_detail_font,
-    GRect(x + w1.w + gap, row_y, w2.w, row_h), COLOR_MUTED, GTextAlignmentLeft);
+    GRect(wave_x + WAVE_ICON_W + icon_gap, row_y, w2_text.w, row_h), GColorWhite, GTextAlignmentLeft);
   prv_draw_text(ctx, height_text, s_large_detail_font,
-    GRect(x + w1.w + gap + w2.w + gap, row_y, w3.w, row_h), GColorWhite, GTextAlignmentLeft);
+    GRect(x + w1.w + gap + w2 + gap, row_y, w3.w, row_h), GColorWhite, GTextAlignmentLeft);
 }
 
 static void prv_draw_now_next_page(GContext *ctx, GRect bounds) {
