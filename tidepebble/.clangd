@@ -2,6 +2,7 @@ CompileFlags:
   Add:
     - "-I/Users/gordonbazeley/Library/Application Support/Pebble SDK/SDKs/4.9.77/sdk-core/pebble/basalt/include"
     - "-I/Users/gordonbazeley/src/tidepebble/tidepebble/build/include"
+    - "-I/Users/gordonbazeley/src/tidepebble/tidepebble/build/basalt/src"
     - "-DPBL_COLOR"
     - "-DPBL_RECT"
     - "-DPBL_SDK_3"
