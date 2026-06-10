@@ -346,12 +346,9 @@ static void prv_draw_event_heading(GContext *ctx, GRect frame, const char *prefi
     color, GTextAlignmentLeft);
 }
 
-static void prv_draw_card_background(GContext *ctx, GRect frame, GColor fill, GColor stripe) {
+static void prv_draw_card_background(GContext *ctx, GRect frame, GColor fill) {
   graphics_context_set_fill_color(ctx, fill);
   graphics_fill_rect(ctx, frame, 8, GCornersAll);
-  graphics_context_set_fill_color(ctx, stripe);
-  graphics_fill_rect(ctx, GRect(frame.origin.x, frame.origin.y, 8, frame.size.h), 8,
-    GCornersLeft);
 }
 
 static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number,
@@ -370,10 +367,10 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   prv_format_height(height_text, sizeof(height_text), s_tide_values[index]);
   prv_format_minutes_to(countdown_text, sizeof(countdown_text), index);
 
-  prv_draw_card_background(ctx, frame, GColorBlack, color);
-  int16_t x = frame.origin.x + 18;
+  prv_draw_card_background(ctx, frame, GColorBlack);
+  int16_t x = frame.origin.x + 12;
   int16_t y = frame.origin.y + (layout == EventCardLayoutLarge ? 8 : 0);
-  prv_draw_event_heading(ctx, GRect(x, y, frame.size.w - 24, 28), prefix, high, s_label_font);
+  prv_draw_event_heading(ctx, GRect(x, y, frame.size.w - 18, 28), prefix, high, s_label_font);
 
   GFont time_font = layout == EventCardLayoutLarge ? s_large_time_font : s_compact_time_font;
   GFont detail_font = layout == EventCardLayoutSmall ? s_detail_font : s_large_detail_font;
@@ -393,8 +390,8 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
     time_y = frame.origin.y + 20;
   }
   prv_draw_text(ctx, time_text, time_font,
-    GRect(x, time_y, frame.size.w - 24, time_h), GColorWhite, GTextAlignmentLeft);
-  int16_t avail_w = frame.size.w - 24;
+    GRect(x, time_y, frame.size.w - 18, time_h), GColorWhite, GTextAlignmentLeft);
+  int16_t avail_w = frame.size.w - 18;
   GSize dw1 = graphics_text_layout_get_content_size(countdown_text, detail_font,
     GRect(0, 0, avail_w, detail_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
   GSize dw2 = graphics_text_layout_get_content_size("\xe2\x80\xa2", detail_font,
@@ -418,8 +415,8 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   prv_format_wave_height(wave_text, sizeof(wave_text), s_wave_height);
   prv_format_sea_temp(temp_text, sizeof(temp_text), s_sea_temp);
 
-  prv_draw_card_background(ctx, frame, GColorBlack, COLOR_NOW);
-  int16_t x = frame.origin.x + 18;
+  prv_draw_card_background(ctx, frame, GColorBlack);
+  int16_t x = frame.origin.x + 12;
   int16_t header_y = frame.origin.y + PAGE_MARGIN;
   int16_t header_h = 28;
   prv_draw_text(ctx, "NOW", s_label_font, GRect(x, header_y, 52, header_h),
@@ -435,7 +432,7 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   int16_t value_h = frame.size.h - PAGE_MARGIN - (value_y - frame.origin.y);
   int16_t row_h = 30;
   int16_t row_y = value_y + (value_h - row_h) / 2;
-  int16_t avail_w = frame.size.w - 24;
+  int16_t avail_w = frame.size.w - 18;
   GSize w1 = graphics_text_layout_get_content_size(height_text, s_large_detail_font,
     GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
   GSize w2 = graphics_text_layout_get_content_size(wave_text, s_large_detail_font,
@@ -659,16 +656,18 @@ static void prv_window_load(Window *window) {
 
   GFont header_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
-    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD));
+    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
+    FONT_KEY_GOTHIC_18_BOLD));
   s_hero_font = fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD);
   s_large_time_font = fonts_get_system_font(FONT_KEY_ROBOTO_BOLD_SUBSET_49);
   s_compact_time_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   s_text_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18,
-    FONT_KEY_GOTHIC_24));
+    FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_18));
   s_label_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
-    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD));
+    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
+    FONT_KEY_GOTHIC_18_BOLD));
   s_detail_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
@@ -679,14 +678,15 @@ static void prv_window_load(Window *window) {
     FONT_KEY_GOTHIC_24_BOLD));
   s_overview_label_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
-    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD));
+    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
+    FONT_KEY_GOTHIC_18_BOLD));
   s_chart_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_14, FONT_KEY_GOTHIC_14, FONT_KEY_GOTHIC_14, FONT_KEY_GOTHIC_14,
-    FONT_KEY_GOTHIC_18));
+    FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_14));
 
   const int16_t top_pad = PBL_IF_ROUND_ELSE(8, 0);
   const int16_t header_h = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-    24, 24, 24, 24, 32);
+    24, 24, 24, 24, 32, 32, 24);
 
   s_location_layer = prv_make_text_layer(
     GRect(4, top_pad, sw / 2 - 4, header_h), header_font, GTextAlignmentLeft);
