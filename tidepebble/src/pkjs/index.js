@@ -18,7 +18,7 @@
     Pebble.sendAppMessage(payload, onSuccess, onError);
   }
 
-  function sendChunkSequence(chunks, index, currentMinutes, fallbackLabel) {
+  function sendChunkSequence(chunks, waveChunks, index, currentMinutes, fallbackLabel) {
     if (index >= chunks.length) {
       return;
     }
@@ -27,9 +27,12 @@
       tide_sample_offset: chunks[index].offset,
       tide_values: chunks[index].values
     };
+    if (waveChunks && index < waveChunks.length) {
+      payload.tide_wave_values = waveChunks[index].values;
+    }
     send(payload, function() {
       setTimeout(function() {
-        sendChunkSequence(chunks, index + 1, currentMinutes, fallbackLabel);
+        sendChunkSequence(chunks, waveChunks, index + 1, currentMinutes, fallbackLabel);
       }, 150);
     }, function() {
       sendStatus('Tide data unavailable', fallbackLabel);
@@ -163,21 +166,29 @@
         var waveH = swellHeights && swellHeights[start] != null ? swellHeights[start] : 0;
         var seaT = seaTemps && seaTemps[start] != null ? seaTemps[start] : 0;
         var values = [];
+        var waveValues = [];
         for (var i = start; i < times.length && values.length < HOURS_TO_SEND; i += 1) {
           if (heights[i] === null || typeof heights[i] === 'undefined') {
             continue;
           }
           values.push(encodeTideValue(Math.round(heights[i] * 100)));
+          var wv = swellHeights && swellHeights[i] != null ? swellHeights[i] : 0;
+          waveValues.push(encodeTideValue(Math.round(wv * 100)));
         }
         if (values.length < 2) {
           sendStatus('No tide forecast near this location', label);
           return;
         }
         var chunks = [];
+        var waveChunks = [];
         for (var chunkStart = 0; chunkStart < values.length; chunkStart += TIDE_CHUNK_SIZE) {
           chunks.push({
             offset: chunkStart,
             values: values.slice(chunkStart, chunkStart + TIDE_CHUNK_SIZE).join('')
+          });
+          waveChunks.push({
+            offset: chunkStart,
+            values: waveValues.slice(chunkStart, chunkStart + TIDE_CHUNK_SIZE).join('')
           });
         }
         send({
@@ -188,7 +199,7 @@
           tide_sea_temp: Math.round(seaT * 10)
         }, function() {
           setTimeout(function() {
-            sendChunkSequence(chunks, 0, currentMinutes, label);
+            sendChunkSequence(chunks, waveChunks, 0, currentMinutes, label);
           }, 150);
         }, function() {
           sendStatus('Tide data unavailable', label);

@@ -29,7 +29,8 @@
       "tide_values",
       "tide_times",
       "tide_wave_height",
-      "tide_sea_temp"
+      "tide_sea_temp",
+      "tide_wave_values"
     ],
     "capabilities": ["configurable", "location"],
     "resources": {

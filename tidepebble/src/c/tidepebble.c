@@ -35,6 +35,8 @@ static Layer *s_content_layer;
 
 static int16_t s_tide_values[TIDE_POINT_COUNT];
 static int16_t s_tide_count;
+static int16_t s_swell_values[TIDE_POINT_COUNT];
+static int16_t s_swell_count;
 static int16_t s_current_minutes;
 static char s_location[LOCATION_MAX_LEN] = "TidePebble";
 static char s_status[STATUS_MAX_LEN] = "Waiting for phone...";
@@ -87,7 +89,7 @@ static int8_t prv_tide_value_digit(char value) {
   return -1;
 }
 
-static int16_t prv_parse_values(const char *csv, int16_t offset) {
+static int16_t prv_parse_values(const char *csv, int16_t offset, int16_t *dest) {
   int16_t count = 0;
   size_t length = strlen(csv);
   for (size_t chunk_offset = 0;
@@ -97,7 +99,7 @@ static int16_t prv_parse_values(const char *csv, int16_t offset) {
     int8_t low = prv_tide_value_digit(csv[chunk_offset + 1]);
     if (high < 0 || low < 0) continue;
     if (offset + count < TIDE_POINT_COUNT) {
-      s_tide_values[offset + count] = ((high << 6) | low) - 2048;
+      dest[offset + count] = ((high << 6) | low) - 2048;
     }
     count += 1;
   }
@@ -258,11 +260,11 @@ static void prv_draw_chart_event(GContext *ctx, bool high, int16_t px, int16_t p
 static void prv_draw_chart_event_label(GContext *ctx, const char *text,
                                        int16_t center_x, int16_t y, GColor color,
                                        GRect frame) {
-  const int16_t label_w = 48;
+  const int16_t label_w = 56;
   int16_t x = center_x - label_w / 2;
 
-  prv_draw_text(ctx, text, s_overview_label_font,
-    GRect(x, y, label_w, 24), color, GTextAlignmentCenter);
+  prv_draw_text(ctx, text, s_large_detail_font,
+    GRect(x, y, label_w, 30), color, GTextAlignmentCenter);
 }
 
 static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
@@ -270,7 +272,7 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
   const int16_t my = 6;
   const int16_t w = frame.size.w - mx * 2;
   const int16_t h = frame.size.h - my * 2;
-  const int16_t label_h = labels ? 27 : 0;
+  const int16_t label_h = labels ? 32 : 0;
   const int16_t plot_y = frame.origin.y + my + label_h;
   int16_t plot_h = h - label_h * 2;
   if (plot_h < 10) plot_h = 10;
@@ -301,11 +303,9 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
       ((s_tide_values[i] - min_v) * plot_h / (max_v - min_v));
     GPoint pt = GPoint(x, y);
     if (i > 0) {
-      graphics_draw_line(ctx, GPoint(prev.x, prev.y - 2), GPoint(pt.x, pt.y - 2));
       graphics_draw_line(ctx, GPoint(prev.x, prev.y - 1), GPoint(pt.x, pt.y - 1));
       graphics_draw_line(ctx, prev, pt);
       graphics_draw_line(ctx, GPoint(prev.x, prev.y + 1), GPoint(pt.x, pt.y + 1));
-      graphics_draw_line(ctx, GPoint(prev.x, prev.y + 2), GPoint(pt.x, pt.y + 2));
     }
     prev = pt;
   }
@@ -344,6 +344,21 @@ static void prv_draw_event_heading(GContext *ctx, GRect frame, const char *prefi
   prv_draw_text(ctx, label, font,
     GRect(frame.origin.x + ARROW_W + 4, frame.origin.y, frame.size.w - ARROW_W - 4, 26),
     color, GTextAlignmentLeft);
+}
+
+#define WAVE_ICON_W 16
+#define WAVE_ICON_H 10
+static void prv_draw_wave_icon(GContext *ctx, GPoint origin, GColor color) {
+  static const GPoint pts[] = {
+    {0, 5}, {2, 2}, {4, 0}, {6, 2}, {8, 5}, {10, 8}, {12, 10}, {14, 8}, {16, 5}
+  };
+  graphics_context_set_stroke_color(ctx, color);
+  graphics_context_set_stroke_width(ctx, 2);
+  for (int i = 0; i < 8; i++) {
+    graphics_draw_line(ctx,
+      GPoint(origin.x + pts[i].x, origin.y + pts[i].y),
+      GPoint(origin.x + pts[i + 1].x, origin.y + pts[i + 1].y));
+  }
 }
 
 static void prv_draw_card_background(GContext *ctx, GRect frame, GColor fill) {
@@ -407,21 +422,6 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   prv_draw_text(ctx, height_text, detail_font,
     GRect(x + dw1.w + dgap + dw2.w + dgap, detail_y, dw3.w, detail_h),
     GColorWhite, GTextAlignmentLeft);
-}
-
-#define WAVE_ICON_W 16
-#define WAVE_ICON_H 10
-static void prv_draw_wave_icon(GContext *ctx, GPoint origin, GColor color) {
-  static const GPoint pts[] = {
-    {0, 5}, {2, 2}, {4, 0}, {6, 2}, {8, 5}, {10, 8}, {12, 10}, {14, 8}, {16, 5}
-  };
-  graphics_context_set_stroke_color(ctx, color);
-  graphics_context_set_stroke_width(ctx, 2);
-  for (int i = 0; i < 8; i++) {
-    graphics_draw_line(ctx,
-      GPoint(origin.x + pts[i].x, origin.y + pts[i].y),
-      GPoint(origin.x + pts[i + 1].x, origin.y + pts[i + 1].y));
-  }
 }
 
 static void prv_draw_now_card(GContext *ctx, GRect frame) {
@@ -574,6 +574,7 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
   Tuple *current_minutes = dict_find(iterator, MESSAGE_KEY_tide_current_minutes);
   Tuple *wave_height = dict_find(iterator, MESSAGE_KEY_tide_wave_height);
   Tuple *sea_temp = dict_find(iterator, MESSAGE_KEY_tide_sea_temp);
+  Tuple *wave_values = dict_find(iterator, MESSAGE_KEY_tide_wave_values);
 
   if (location) {
     strncpy(s_location, location->value->cstring, sizeof(s_location) - 1);
@@ -592,8 +593,18 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
     char value_csv[160];
     strncpy(value_csv, values->value->cstring, sizeof(value_csv) - 1);
     value_csv[sizeof(value_csv) - 1] = '\0';
-    int16_t parsed = prv_parse_values(value_csv, offset);
+    int16_t parsed = prv_parse_values(value_csv, offset, s_tide_values);
     if (offset + parsed > s_tide_count) s_tide_count = offset + parsed;
+  }
+  if (wave_values) {
+    if (offset == 0) {
+      s_swell_count = 0;
+    }
+    char wave_csv[160];
+    strncpy(wave_csv, wave_values->value->cstring, sizeof(wave_csv) - 1);
+    wave_csv[sizeof(wave_csv) - 1] = '\0';
+    int16_t parsed = prv_parse_values(wave_csv, offset, s_swell_values);
+    if (offset + parsed > s_swell_count) s_swell_count = offset + parsed;
   }
   if (current_minutes) s_current_minutes = current_minutes->value->int16;
   if (wave_height) s_wave_height = wave_height->value->int16;
