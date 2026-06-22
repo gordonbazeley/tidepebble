@@ -25,7 +25,6 @@ typedef enum {
 typedef enum {
   EventCardLayoutLarge,
   EventCardLayoutNext,
-  EventCardLayoutSmall,
 } EventCardLayout;
 
 static Window *s_window;
@@ -52,11 +51,7 @@ static int16_t s_sea_temp = 0;
 static char s_time_display[6] = "--:--";
 static GFont s_text_font;
 static GFont s_label_font;
-static GFont s_detail_font;
 static GFont s_large_detail_font;
-static GFont s_chart_font;
-static GFont s_overview_label_font;
-static GFont s_hero_font;
 static GFont s_large_time_font;
 static GFont s_compact_time_font;
 static AppTimer *s_double_tap_timer;
@@ -388,12 +383,10 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   prv_draw_event_heading(ctx, GRect(x, y, frame.size.w - 18, 28), prefix, high, s_label_font);
 
   GFont time_font = layout == EventCardLayoutLarge ? s_large_time_font : s_compact_time_font;
-  GFont detail_font = layout == EventCardLayoutSmall ? s_detail_font : s_large_detail_font;
   int16_t time_h = layout == EventCardLayoutLarge ? 72 : 34;
   int16_t time_y;
-  int16_t detail_h = layout == EventCardLayoutSmall ? 22 : 30;
-  int16_t detail_y = frame.origin.y + frame.size.h -
-    (layout == EventCardLayoutSmall ? 24 : 34);
+  int16_t detail_h = 30;
+  int16_t detail_y = frame.origin.y + frame.size.h - 34;
   if (layout == EventCardLayoutLarge) {
     time_y = frame.origin.y + 46;
   } else if (layout == EventCardLayoutNext) {
@@ -407,19 +400,19 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   prv_draw_text(ctx, time_text, time_font,
     GRect(x, time_y, frame.size.w - 18, time_h), GColorWhite, GTextAlignmentLeft);
   int16_t avail_w = frame.size.w - 18;
-  GSize dw1 = graphics_text_layout_get_content_size(countdown_text, detail_font,
+  GSize dw1 = graphics_text_layout_get_content_size(countdown_text, s_large_detail_font,
     GRect(0, 0, avail_w, detail_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  GSize dw2 = graphics_text_layout_get_content_size("\xe2\x80\xa2", detail_font,
+  GSize dw2 = graphics_text_layout_get_content_size("\xe2\x80\xa2", s_large_detail_font,
     GRect(0, 0, avail_w, detail_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  GSize dw3 = graphics_text_layout_get_content_size(height_text, detail_font,
+  GSize dw3 = graphics_text_layout_get_content_size(height_text, s_large_detail_font,
     GRect(0, 0, avail_w, detail_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
   int16_t dgap = (avail_w - dw1.w - dw2.w - dw3.w) / 2;
   if (dgap < 0) dgap = 0;
-  prv_draw_text(ctx, countdown_text, detail_font,
+  prv_draw_text(ctx, countdown_text, s_large_detail_font,
     GRect(x, detail_y, dw1.w, detail_h), GColorWhite, GTextAlignmentLeft);
-  prv_draw_text(ctx, "\xe2\x80\xa2", detail_font,
+  prv_draw_text(ctx, "\xe2\x80\xa2", s_large_detail_font,
     GRect(x + dw1.w + dgap, detail_y, dw2.w, detail_h), color, GTextAlignmentLeft);
-  prv_draw_text(ctx, height_text, detail_font,
+  prv_draw_text(ctx, height_text, s_large_detail_font,
     GRect(x + dw1.w + dgap + dw2.w + dgap, detail_y, dw3.w, detail_h),
     GColorWhite, GTextAlignmentLeft);
 }
@@ -688,7 +681,6 @@ static void prv_window_load(Window *window) {
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
     FONT_KEY_GOTHIC_18_BOLD));
-  s_hero_font = fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD);
   s_large_time_font = fonts_get_system_font(FONT_KEY_ROBOTO_BOLD_SUBSET_49);
   s_compact_time_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   s_text_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
@@ -698,22 +690,10 @@ static void prv_window_load(Window *window) {
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
     FONT_KEY_GOTHIC_18_BOLD));
-  s_detail_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
-    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
-    FONT_KEY_GOTHIC_18_BOLD));
   s_large_detail_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
     FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_28_BOLD, FONT_KEY_GOTHIC_28_BOLD,
     FONT_KEY_GOTHIC_24_BOLD));
-  s_overview_label_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
-    FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
-    FONT_KEY_GOTHIC_18_BOLD));
-  s_chart_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
-    FONT_KEY_GOTHIC_14, FONT_KEY_GOTHIC_14, FONT_KEY_GOTHIC_14, FONT_KEY_GOTHIC_14,
-    FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_18, FONT_KEY_GOTHIC_14));
-
   const int16_t top_pad = PBL_IF_ROUND_ELSE(8, 0);
   const int16_t header_h = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     24, 24, 24, 24, 32, 32, 24);

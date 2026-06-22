@@ -14,10 +14,6 @@
   var SELECTED_LOCATION_KEY = 'tide_selected_location_v1';
   var s_selectedLocation = null;
 
-  function send(payload, onSuccess, onError) {
-    Pebble.sendAppMessage(payload, onSuccess, onError);
-  }
-
   function sendChunkSequence(chunks, waveChunks, index, currentMinutes, fallbackLabel) {
     if (index >= chunks.length) {
       return;
@@ -30,7 +26,7 @@
     if (waveChunks && index < waveChunks.length) {
       payload.tide_wave_values = waveChunks[index].values;
     }
-    send(payload, function() {
+    Pebble.sendAppMessage(payload, function() {
       setTimeout(function() {
         sendChunkSequence(chunks, waveChunks, index + 1, currentMinutes, fallbackLabel);
       }, 150);
@@ -44,7 +40,7 @@
     if (location) {
       payload.tide_location = location;
     }
-    send(payload);
+    Pebble.sendAppMessage(payload);
   }
 
   function encodeTideValue(value) {
@@ -191,7 +187,7 @@
             values: waveValues.slice(chunkStart, chunkStart + TIDE_CHUNK_SIZE).join('')
           });
         }
-        send({
+        Pebble.sendAppMessage({
           tide_location: label,
           tide_status: '',
           tide_current_minutes: currentMinutes,
