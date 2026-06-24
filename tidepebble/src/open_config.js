@@ -6,6 +6,7 @@
 var http = require('http');
 var fs = require('fs');
 var path = require('path');
+var crypto = require('crypto');
 var child_process = require('child_process');
 
 var pkg = require(path.resolve(__dirname, '..', 'package.json'));
@@ -55,6 +56,11 @@ if (!fs.existsSync(SETTINGS_HTML)) {
   process.exit(1);
 }
 var html = fs.readFileSync(SETTINGS_HTML, 'utf8');
+var saveToken = crypto.randomBytes(16).toString('hex');
+
+function finiteNumber(value) {
+  return typeof value === 'number' && isFinite(value);
+}
 
 // Determine current state from localStorage
 function getCurrentState() {
@@ -65,8 +71,8 @@ function getCurrentState() {
       var loc = JSON.parse(raw);
       state.mode = 'manual';
       state.location = loc.name + (loc.admin1 ? ', ' + loc.admin1 : '');
-      state.lat = loc.latitude;
-      state.lon = loc.longitude;
+      state.lat = finiteNumber(loc.latitude) ? loc.latitude : null;
+      state.lon = finiteNumber(loc.longitude) ? loc.longitude : null;
     }
   } catch (e) {}
   return state;
@@ -101,6 +107,11 @@ var server = http.createServer(function(req, res) {
   var parsed = new URL(req.url, 'http://127.0.0.1');
 
   if (parsed.pathname === '/save') {
+    if (parsed.searchParams.get('token') !== saveToken) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
     var rawData = parsed.searchParams.get('data') || '';
     var settings;
     try {
@@ -120,7 +131,8 @@ var server = http.createServer(function(req, res) {
     if (settings.mode === 'gps' || settings.usePhoneLocation) {
       delete storageData[SELECTED_LOCATION_KEY];
       console.log('GPS mode: cleared manual location');
-    } else if (settings.mode === 'manual' && typeof settings.lat === 'number') {
+    } else if (settings.mode === 'manual' && finiteNumber(settings.lat) &&
+        finiteNumber(settings.lon)) {
       // New state format
       var locParts = (settings.location || '').split(', ');
       storageData[SELECTED_LOCATION_KEY] = JSON.stringify({
@@ -130,7 +142,7 @@ var server = http.createServer(function(req, res) {
         admin1: locParts[1] || '',
         country: locParts[2] || '',
       });
-    } else if (typeof settings.latitude === 'number') {
+    } else if (finiteNumber(settings.latitude) && finiteNumber(settings.longitude)) {
       // Legacy format
       storageData[SELECTED_LOCATION_KEY] = JSON.stringify(settings);
     }
@@ -172,7 +184,7 @@ server.listen(0, '127.0.0.1', function() {
   }, 600000);
 
   var base = 'http://127.0.0.1:' + port;
-  var returnTo = encodeURIComponent(base + '/save?data=');
+  var returnTo = encodeURIComponent(base + '/save?token=' + saveToken + '&data=');
 
   // Build query string from current state
   var state = getCurrentState();
@@ -187,7 +199,7 @@ server.listen(0, '127.0.0.1', function() {
   var configUrl = base + '/?' + params.join('&');
 
   try {
-    child_process.execSync('open -a "Brave Browser" ' + JSON.stringify(configUrl));
+    child_process.execFileSync('open', ['-a', 'Brave Browser', configUrl]);
     console.log('Config server: http://127.0.0.1:' + port);
     console.log('Current state:', JSON.stringify(state));
   } catch (e) {

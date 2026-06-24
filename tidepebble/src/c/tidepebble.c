@@ -84,18 +84,28 @@ static int8_t prv_tide_value_digit(char value) {
   return -1;
 }
 
+static bool prv_copy_cstring_tuple(Tuple *tuple, char *dest, size_t dest_size) {
+  if (!tuple || tuple->type != TUPLE_CSTRING || dest_size == 0) return false;
+  const char *source = (const char *)tuple->value;
+  size_t copy_len = tuple->length;
+  if (copy_len >= dest_size) copy_len = dest_size - 1;
+  if (copy_len > 0 && source[copy_len - 1] == '\0') copy_len -= 1;
+  memcpy(dest, source, copy_len);
+  dest[copy_len] = '\0';
+  return true;
+}
+
 static int16_t prv_parse_values(const char *csv, int16_t offset, int16_t *dest) {
+  if (offset < 0 || offset >= TIDE_POINT_COUNT) return 0;
   int16_t count = 0;
   size_t length = strlen(csv);
   for (size_t chunk_offset = 0;
-       chunk_offset + 1 < length && count < TIDE_POINT_COUNT;
+       chunk_offset + 1 < length && offset + count < TIDE_POINT_COUNT;
        chunk_offset += 2) {
     int8_t high = prv_tide_value_digit(csv[chunk_offset]);
     int8_t low = prv_tide_value_digit(csv[chunk_offset + 1]);
     if (high < 0 || low < 0) continue;
-    if (offset + count < TIDE_POINT_COUNT) {
-      dest[offset + count] = ((high << 6) | low) - 2048;
-    }
+    dest[offset + count] = ((high << 6) | low) - 2048;
     count += 1;
   }
   return count;
@@ -569,14 +579,8 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
   Tuple *sea_temp = dict_find(iterator, MESSAGE_KEY_tide_sea_temp);
   Tuple *wave_values = dict_find(iterator, MESSAGE_KEY_tide_wave_values);
 
-  if (location) {
-    strncpy(s_location, location->value->cstring, sizeof(s_location) - 1);
-    s_location[sizeof(s_location) - 1] = '\0';
-  }
-  if (status) {
-    strncpy(s_status, status->value->cstring, sizeof(s_status) - 1);
-    s_status[sizeof(s_status) - 1] = '\0';
-  }
+  prv_copy_cstring_tuple(location, s_location, sizeof(s_location));
+  prv_copy_cstring_tuple(status, s_status, sizeof(s_status));
   int16_t offset = 0;
   if (sample_offset) offset = sample_offset->value->int16;
   if (values) {
@@ -584,20 +588,20 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
       s_tide_count = 0;
     }
     char value_csv[160];
-    strncpy(value_csv, values->value->cstring, sizeof(value_csv) - 1);
-    value_csv[sizeof(value_csv) - 1] = '\0';
-    int16_t parsed = prv_parse_values(value_csv, offset, s_tide_values);
-    if (offset + parsed > s_tide_count) s_tide_count = offset + parsed;
+    if (prv_copy_cstring_tuple(values, value_csv, sizeof(value_csv))) {
+      int16_t parsed = prv_parse_values(value_csv, offset, s_tide_values);
+      if (parsed > 0 && offset + parsed > s_tide_count) s_tide_count = offset + parsed;
+    }
   }
   if (wave_values) {
     if (offset == 0) {
       s_swell_count = 0;
     }
     char wave_csv[160];
-    strncpy(wave_csv, wave_values->value->cstring, sizeof(wave_csv) - 1);
-    wave_csv[sizeof(wave_csv) - 1] = '\0';
-    int16_t parsed = prv_parse_values(wave_csv, offset, s_swell_values);
-    if (offset + parsed > s_swell_count) s_swell_count = offset + parsed;
+    if (prv_copy_cstring_tuple(wave_values, wave_csv, sizeof(wave_csv))) {
+      int16_t parsed = prv_parse_values(wave_csv, offset, s_swell_values);
+      if (parsed > 0 && offset + parsed > s_swell_count) s_swell_count = offset + parsed;
+    }
   }
   if (current_minutes) s_current_minutes = current_minutes->value->int16;
   if (wave_height) s_wave_height = wave_height->value->int16;

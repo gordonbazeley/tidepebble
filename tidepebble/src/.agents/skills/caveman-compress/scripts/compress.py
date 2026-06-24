@@ -65,6 +65,15 @@ SENSITIVE_NAME_TOKENS = (
     "apikey", "accesskey", "token", "privatekey",
 )
 
+SENSITIVE_CONTENT_REGEX = re.compile(
+    r"(?im)("
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    r"|\\b(?:api[_-]?key|access[_-]?key|secret|token|password|passwd)\\b\\s*[:=]\\s*['\"]?[^\\s'\"]{12,}"
+    r"|\\b(?:AKIA|ASIA)[A-Z0-9]{16}\\b"
+    r"|\\bsk-[A-Za-z0-9_-]{20,}\\b"
+    r")"
+)
+
 
 def backup_dir_for(filepath: Path) -> Path:
     """Resolve the out-of-tree backup directory for a given source file.
@@ -247,6 +256,12 @@ def compress_file(filepath: Path) -> bool:
         return False
 
     original_text = filepath.read_text(errors="ignore")
+    if SENSITIVE_CONTENT_REGEX.search(original_text):
+        raise ValueError(
+            f"Refusing to compress {filepath}: content looks like it contains "
+            "credentials, tokens, or private keys. Compression sends file "
+            "contents to the Anthropic API."
+        )
     # Store backup outside the source directory so skill auto-loaders don't
     # re-ingest the `.original.md` copy as a live file. Mirror the source's
     # parent-dir name + stem under a platform-aware base to reduce collisions.

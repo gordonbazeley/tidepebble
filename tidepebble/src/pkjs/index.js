@@ -282,7 +282,11 @@
       lat: s_selectedLocation ? s_selectedLocation.latitude : null,
       lon: s_selectedLocation ? s_selectedLocation.longitude : null,
     };
-    var init = 'var injected=' + JSON.stringify(state) + ';';
+    var stateJson = JSON.stringify(state)
+      .replace(/[<>&\u2028\u2029]/g, function(ch) {
+        return '\\u' + ('0000' + ch.charCodeAt(0).toString(16)).slice(-4);
+      });
+    var init = 'var injected=' + stateJson + ';';
     var html = SETTINGS_HTML.replace('/*STATE_INIT*/', init);
     Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
   });
