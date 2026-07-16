@@ -13,6 +13,20 @@
 #define PAGE_MARGIN 8
 #define PAGE_DOTS_W 20
 #define CARD_GAP 8
+#define STALE_ICON_W 14
+#define STALE_ICON_GAP 4
+#define WAKEUP_INTERVAL_SECONDS (60 * 60)
+#define STALE_THRESHOLD_SECONDS (80 * 60)
+#define AUTO_CLOSE_DELAY_MS 5000
+
+#define PERSIST_KEY_TIDE_VALUES 1
+#define PERSIST_KEY_TIDE_COUNT 2
+#define PERSIST_KEY_LOCATION 3
+#define PERSIST_KEY_WAVE_HEIGHT 4
+#define PERSIST_KEY_SEA_TEMP 5
+#define PERSIST_KEY_CURRENT_MINUTES_AT_SYNC 6
+#define PERSIST_KEY_LAST_SYNC_EPOCH 7
+#define PERSIST_KEY_BACKGROUND_REFRESH 8
 
 typedef enum {
   TidePageOverview = 0,
@@ -31,6 +45,7 @@ static Window *s_window;
 static TextLayer *s_location_layer;
 static TextLayer *s_time_layer;
 static Layer *s_content_layer;
+static Layer *s_stale_icon_layer;
 
 static int16_t s_tide_values[TIDE_POINT_COUNT];
 static int16_t s_tide_count;
@@ -50,12 +65,18 @@ static int16_t s_wave_height = 0;
 static int16_t s_sea_temp = 0;
 static char s_time_display[6] = "--:--";
 static GFont s_text_font;
+static GFont s_header_font;
 static GFont s_label_font;
 static GFont s_large_detail_font;
 static GFont s_large_time_font;
 static GFont s_compact_time_font;
 static AppTimer *s_double_tap_timer;
 static bool s_waiting_for_double_tap;
+static AppTimer *s_close_timer;
+static bool s_is_stale;
+static bool s_background_refresh_enabled = true;
+static time_t s_last_sync_epoch;
+static int16_t s_current_minutes_at_sync;
 
 #define COLOR_HIGH      PBL_IF_COLOR_ELSE(GColorBrightGreen, GColorWhite)
 #define COLOR_LOW       PBL_IF_COLOR_ELSE(GColorOrange, GColorWhite)
@@ -366,6 +387,23 @@ static void prv_draw_wave_icon(GContext *ctx, GPoint origin, GColor color) {
   }
 }
 
+#define COLOR_STALE PBL_IF_COLOR_ELSE(GColorRed, GColorWhite)
+#define CLOCK_ICON_RADIUS 5
+static void prv_draw_clock_icon(GContext *ctx, GPoint center, GColor color) {
+  graphics_context_set_stroke_color(ctx, color);
+  graphics_context_set_stroke_width(ctx, 1);
+  graphics_draw_circle(ctx, center, CLOCK_ICON_RADIUS);
+  graphics_draw_line(ctx, center, GPoint(center.x, center.y - CLOCK_ICON_RADIUS + 2));
+  graphics_draw_line(ctx, center, GPoint(center.x + CLOCK_ICON_RADIUS - 2, center.y));
+}
+
+static void prv_stale_icon_update_proc(Layer *layer, GContext *ctx) {
+  if (!s_is_stale) return;
+  GRect bounds = layer_get_bounds(layer);
+  GPoint center = GPoint(bounds.origin.x + CLOCK_ICON_RADIUS, bounds.origin.y + bounds.size.h / 2);
+  prv_draw_clock_icon(ctx, center, COLOR_STALE);
+}
+
 static void prv_draw_card_background(GContext *ctx, GRect frame, GColor fill) {
   graphics_context_set_fill_color(ctx, fill);
   graphics_fill_rect(ctx, frame, 8, GCornersAll);
@@ -564,9 +602,68 @@ static void prv_set_text(void) {
   strftime(s_time_display, sizeof(s_time_display), prv_clock_format(), localtime(&now));
   prv_strip_leading_zero(s_time_display);
   text_layer_set_text(s_time_layer, s_time_display);
+  text_layer_set_text_color(s_time_layer, s_is_stale ? COLOR_STALE : GColorWhite);
   text_layer_set_text(s_location_layer, s_location);
+
+  GRect time_frame = layer_get_frame(text_layer_get_layer(s_time_layer));
+  GSize time_size = graphics_text_layout_get_content_size(s_time_display, s_header_font,
+    time_frame, GTextOverflowModeTrailingEllipsis, GTextAlignmentRight);
+  GRect icon_frame = layer_get_frame(s_stale_icon_layer);
+  icon_frame.origin.x = time_frame.origin.x + time_frame.size.w - time_size.w -
+    STALE_ICON_GAP - STALE_ICON_W;
+  layer_set_frame(s_stale_icon_layer, icon_frame);
+
   prv_apply_page_background();
   layer_mark_dirty(s_content_layer);
+  layer_mark_dirty(s_stale_icon_layer);
+}
+
+static void prv_persist_save(void) {
+  persist_write_data(PERSIST_KEY_TIDE_VALUES, s_tide_values, sizeof(s_tide_values));
+  persist_write_int(PERSIST_KEY_TIDE_COUNT, s_tide_count);
+  persist_write_string(PERSIST_KEY_LOCATION, s_location);
+  persist_write_int(PERSIST_KEY_WAVE_HEIGHT, s_wave_height);
+  persist_write_int(PERSIST_KEY_SEA_TEMP, s_sea_temp);
+  persist_write_int(PERSIST_KEY_CURRENT_MINUTES_AT_SYNC, s_current_minutes_at_sync);
+  persist_write_int(PERSIST_KEY_LAST_SYNC_EPOCH, (int32_t)s_last_sync_epoch);
+}
+
+static void prv_persist_load(void) {
+  if (!persist_exists(PERSIST_KEY_TIDE_VALUES)) return;
+  persist_read_data(PERSIST_KEY_TIDE_VALUES, s_tide_values, sizeof(s_tide_values));
+  s_tide_count = (int16_t)persist_read_int(PERSIST_KEY_TIDE_COUNT);
+  persist_read_string(PERSIST_KEY_LOCATION, s_location, sizeof(s_location));
+  s_wave_height = (int16_t)persist_read_int(PERSIST_KEY_WAVE_HEIGHT);
+  s_sea_temp = (int16_t)persist_read_int(PERSIST_KEY_SEA_TEMP);
+  s_current_minutes_at_sync = (int16_t)persist_read_int(PERSIST_KEY_CURRENT_MINUTES_AT_SYNC);
+  s_last_sync_epoch = (time_t)persist_read_int(PERSIST_KEY_LAST_SYNC_EPOCH);
+  s_current_minutes = s_current_minutes_at_sync;
+}
+
+static void prv_reschedule_wakeup(void) {
+  wakeup_cancel_all();
+  if (s_background_refresh_enabled) {
+    wakeup_schedule(time(NULL) + WAKEUP_INTERVAL_SECONDS, 0, true);
+  }
+}
+
+static void prv_send_refresh_request(void) {
+  DictionaryIterator *iter;
+  if (app_message_outbox_begin(&iter) != APP_MSG_OK) return;
+  dict_write_uint8(iter, MESSAGE_KEY_tide_refresh_request, 1);
+  app_message_outbox_send();
+}
+
+static void prv_auto_close_callback(void *context) {
+  s_close_timer = NULL;
+  window_stack_pop_all(true);
+}
+
+static void prv_wakeup_handler(WakeupId wakeup_id, int32_t cookie) {
+  if (!quiet_time_is_active()) {
+    prv_send_refresh_request();
+  }
+  prv_reschedule_wakeup();
 }
 
 static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
@@ -578,6 +675,8 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
   Tuple *wave_height = dict_find(iterator, MESSAGE_KEY_tide_wave_height);
   Tuple *sea_temp = dict_find(iterator, MESSAGE_KEY_tide_sea_temp);
   Tuple *wave_values = dict_find(iterator, MESSAGE_KEY_tide_wave_values);
+  Tuple *sync_complete = dict_find(iterator, MESSAGE_KEY_tide_sync_complete);
+  Tuple *background_refresh = dict_find(iterator, MESSAGE_KEY_tide_background_refresh);
 
   prv_copy_cstring_tuple(location, s_location, sizeof(s_location));
   prv_copy_cstring_tuple(status, s_status, sizeof(s_status));
@@ -607,11 +706,32 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
   if (wave_height) s_wave_height = wave_height->value->int16;
   if (sea_temp) s_sea_temp = sea_temp->value->int16;
 
+  if (background_refresh) {
+    bool enabled = background_refresh->value->int32 != 0;
+    if (enabled != s_background_refresh_enabled) {
+      s_background_refresh_enabled = enabled;
+      persist_write_bool(PERSIST_KEY_BACKGROUND_REFRESH, s_background_refresh_enabled);
+      prv_reschedule_wakeup();
+    }
+  }
+
+  if (sync_complete) {
+    s_current_minutes_at_sync = s_current_minutes;
+    s_last_sync_epoch = time(NULL);
+    s_is_stale = false;
+    prv_persist_save();
+  }
+
   prv_compute_state();
   prv_set_text();
 }
 
 static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
+  if (s_last_sync_epoch > 0) {
+    time_t elapsed = time(NULL) - s_last_sync_epoch;
+    s_current_minutes = s_current_minutes_at_sync + (int16_t)(elapsed / 60);
+    s_is_stale = elapsed > STALE_THRESHOLD_SECONDS;
+  }
   prv_compute_state();
   prv_set_text();
 }
@@ -685,6 +805,7 @@ static void prv_window_load(Window *window) {
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_18_BOLD,
     FONT_KEY_GOTHIC_18_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
     FONT_KEY_GOTHIC_18_BOLD));
+  s_header_font = header_font;
   s_large_time_font = fonts_get_system_font(FONT_KEY_ROBOTO_BOLD_SUBSET_49);
   s_compact_time_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   s_text_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
@@ -702,6 +823,8 @@ static void prv_window_load(Window *window) {
   const int16_t header_h = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     24, 24, 24, 24, 32, 32, 24);
 
+  s_stale_icon_layer = layer_create(GRect(sw / 2, top_pad, STALE_ICON_W, header_h));
+  layer_set_update_proc(s_stale_icon_layer, prv_stale_icon_update_proc);
   s_location_layer = prv_make_text_layer(
     GRect(4, top_pad, sw / 2 - 4, header_h), header_font, GTextAlignmentLeft);
   s_time_layer = prv_make_text_layer(
@@ -709,6 +832,7 @@ static void prv_window_load(Window *window) {
   s_content_layer = layer_create(GRect(0, top_pad + header_h, sw, sh - top_pad - header_h));
   layer_set_update_proc(s_content_layer, prv_content_update_proc);
 
+  layer_add_child(root, s_stale_icon_layer);
   layer_add_child(root, text_layer_get_layer(s_location_layer));
   layer_add_child(root, text_layer_get_layer(s_time_layer));
   layer_add_child(root, s_content_layer);
@@ -721,11 +845,16 @@ static void prv_window_unload(Window *window) {
   text_layer_destroy(s_location_layer);
   text_layer_destroy(s_time_layer);
   layer_destroy(s_content_layer);
+  layer_destroy(s_stale_icon_layer);
 }
 
 static void prv_init(void) {
   s_arrow_up_path = gpath_create(&s_arrow_up_info);
   s_arrow_down_path = gpath_create(&s_arrow_down_info);
+
+  s_background_refresh_enabled = persist_exists(PERSIST_KEY_BACKGROUND_REFRESH)
+    ? persist_read_bool(PERSIST_KEY_BACKGROUND_REFRESH) : true;
+  prv_persist_load();
 
   s_window = window_create();
   window_set_background_color(s_window, GColorBlack);
@@ -736,8 +865,22 @@ static void prv_init(void) {
   });
   window_stack_push(s_window, true);
 
+  wakeup_service_subscribe(prv_wakeup_handler);
   app_message_register_inbox_received(prv_inbox_received);
   app_message_open(512, 128);
+
+  bool launched_by_wakeup = launch_reason() == APP_LAUNCH_WAKEUP;
+  if (launched_by_wakeup && quiet_time_is_active()) {
+    prv_reschedule_wakeup();
+    s_close_timer = app_timer_register(10, prv_auto_close_callback, NULL);
+  } else {
+    prv_send_refresh_request();
+    prv_reschedule_wakeup();
+    if (launched_by_wakeup) {
+      s_close_timer = app_timer_register(AUTO_CLOSE_DELAY_MS, prv_auto_close_callback, NULL);
+    }
+  }
+
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick_handler);
   accel_tap_service_subscribe(prv_tap_handler);
 }
@@ -747,6 +890,9 @@ static void prv_deinit(void) {
   tick_timer_service_unsubscribe();
   if (s_double_tap_timer) {
     app_timer_cancel(s_double_tap_timer);
+  }
+  if (s_close_timer) {
+    app_timer_cancel(s_close_timer);
   }
   window_destroy(s_window);
   gpath_destroy(s_arrow_up_path);

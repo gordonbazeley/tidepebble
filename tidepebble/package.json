@@ -26,7 +26,10 @@
       "tide_times",
       "tide_wave_height",
       "tide_sea_temp",
-      "tide_wave_values"
+      "tide_wave_values",
+      "tide_sync_complete",
+      "tide_background_refresh",
+      "tide_refresh_request"
     ],
     "capabilities": ["configurable", "location"],
     "resources": {

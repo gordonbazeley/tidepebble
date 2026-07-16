@@ -262,6 +262,22 @@
     </section>
 
     <section>
+      <p class="seclabel">Refresh</p>
+      <div class="card">
+        <div class="row">
+          <div class="rl">
+            <div class="rt">Background hourly refresh</div>
+            <div class="rd">Wakes the watch once an hour (when not in Quiet Time) to keep tide data current. Turn off to only refresh when you open the app. If it hasn't been possible to download data a clock icon will be shown next to time to indicate the data is stale.</div>
+          </div>
+          <div class="miniseg" role="tablist" aria-label="Background refresh">
+            <button role="tab" id="bgOn" aria-selected="true" onclick="setBackgroundRefresh(true)">On</button>
+            <button role="tab" id="bgOff" aria-selected="false" onclick="setBackgroundRefresh(false)">Off</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
       <p class="seclabel">Data sources</p>
       <div class="card">
         <div class="pad">
@@ -300,7 +316,7 @@
   if (typeof injected === 'undefined') {
     var injected = null;
   }
-  var state = Object.assign({ mode: 'gps', location: 'Phone GPS', lat: null, lon: null },
+  var state = Object.assign({ mode: 'gps', location: 'Phone GPS', lat: null, lon: null, backgroundRefresh: true },
     injected || {});
 
   // URL params take precedence (open_config.js dev flow passes these)
@@ -311,6 +327,8 @@
     var lat = parseFloat(getQuery('lat')), lon = parseFloat(getQuery('lon'));
     if (!isNaN(lat)) state.lat = lat;
     if (!isNaN(lon)) state.lon = lon;
+    var bg = getQuery('backgroundRefresh');
+    if (bg !== null) state.backgroundRefresh = bg !== 'false';
   })();
 
   // ---- apply state to UI ----
@@ -322,6 +340,14 @@
     document.getElementById('tabGps').setAttribute('aria-selected', state.mode === 'gps' ? 'true' : 'false');
     document.getElementById('tabManual').setAttribute('aria-selected', state.mode === 'manual' ? 'true' : 'false');
     document.getElementById('manualWrap').hidden = state.mode !== 'manual';
+    document.getElementById('bgOn').setAttribute('aria-selected', state.backgroundRefresh ? 'true' : 'false');
+    document.getElementById('bgOff').setAttribute('aria-selected', state.backgroundRefresh ? 'false' : 'true');
+  }
+
+  // ---- background refresh toggle ----
+  function setBackgroundRefresh(enabled) {
+    state.backgroundRefresh = enabled;
+    applyState();
   }
 
   // ---- mode toggle ----

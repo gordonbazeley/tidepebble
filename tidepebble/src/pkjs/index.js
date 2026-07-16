@@ -12,10 +12,23 @@
     }
   };
   var SELECTED_LOCATION_KEY = 'tide_selected_location_v1';
+  var BACKGROUND_REFRESH_KEY = 'tide_background_refresh_v1';
   var s_selectedLocation = null;
+  var s_backgroundRefresh = true;
+
+  function loadBackgroundRefresh() {
+    var raw = localStorage.getItem(BACKGROUND_REFRESH_KEY);
+    s_backgroundRefresh = raw === null ? true : raw === 'true';
+  }
+
+  function saveBackgroundRefresh(enabled) {
+    s_backgroundRefresh = enabled;
+    localStorage.setItem(BACKGROUND_REFRESH_KEY, enabled ? 'true' : 'false');
+  }
 
   function sendChunkSequence(chunks, waveChunks, index, currentMinutes, fallbackLabel) {
     if (index >= chunks.length) {
+      Pebble.sendAppMessage({ tide_sync_complete: 1 });
       return;
     }
     var payload = {
@@ -36,7 +49,10 @@
   }
 
   function sendStatus(status, location) {
-    var payload = { tide_status: status };
+    var payload = {
+      tide_status: status,
+      tide_background_refresh: s_backgroundRefresh ? 1 : 0
+    };
     if (location) {
       payload.tide_location = location;
     }
@@ -192,7 +208,8 @@
           tide_status: '',
           tide_current_minutes: currentMinutes,
           tide_wave_height: Math.round(waveH * 100),
-          tide_sea_temp: Math.round(seaT * 10)
+          tide_sea_temp: Math.round(seaT * 10),
+          tide_background_refresh: s_backgroundRefresh ? 1 : 0
         }, function() {
           setTimeout(function() {
             sendChunkSequence(chunks, waveChunks, 0, currentMinutes, label);
@@ -212,6 +229,7 @@
 
   function refresh() {
     loadSelectedLocation();
+    loadBackgroundRefresh();
     if (s_selectedLocation) {
       fetchTides({ coords: s_selectedLocation }, geocodingLabel(s_selectedLocation));
       return;
@@ -245,7 +263,10 @@
       if (!data) {
         return;
       }
-      // New state format: {mode, location, lat, lon}
+      // New state format: {mode, location, lat, lon, backgroundRefresh}
+      if (typeof data.backgroundRefresh === 'boolean') {
+        saveBackgroundRefresh(data.backgroundRefresh);
+      }
       if (data.mode === 'gps' || data.usePhoneLocation) {
         clearSelectedLocation();
         refresh();
@@ -275,12 +296,14 @@
   });
   Pebble.addEventListener('showConfiguration', function() {
     loadSelectedLocation();
+    loadBackgroundRefresh();
     var SETTINGS_HTML = require('./settings-html');
     var state = {
       mode: s_selectedLocation ? 'manual' : 'gps',
       location: s_selectedLocation ? geocodingLabel(s_selectedLocation) : 'Phone GPS',
       lat: s_selectedLocation ? s_selectedLocation.latitude : null,
       lon: s_selectedLocation ? s_selectedLocation.longitude : null,
+      backgroundRefresh: s_backgroundRefresh,
     };
     var stateJson = JSON.stringify(state)
       .replace(/[<>&\u2028\u2029]/g, function(ch) {
