@@ -32,7 +32,7 @@
 
 typedef enum {
   TidePageOverview = 0,
-  TidePageNowNext = 1,
+  TidePageNow = 1,
   TidePageThen = 2,
   TidePageLater = 3,
   TidePageCount = 4,
@@ -57,7 +57,7 @@ static int16_t s_current_minutes;
 static char s_location[LOCATION_MAX_LEN] = "TidePebble";
 static char s_status[STATUS_MAX_LEN] = "Waiting for phone...";
 
-static TidePage s_page = TidePageNowNext;
+static TidePage s_page = TidePageNow;
 static int16_t s_event_indices[TIDE_EVENT_COUNT];
 static bool s_event_highs[TIDE_EVENT_COUNT];
 static int16_t s_event_count;
@@ -70,6 +70,7 @@ static GFont s_text_font;
 static GFont s_header_font;
 static GFont s_label_font;
 static GFont s_large_detail_font;
+static GFont s_large_label_font;
 static GFont s_large_time_font;
 static GFont s_compact_time_font;
 static AppTimer *s_double_tap_timer;
@@ -475,6 +476,31 @@ static void prv_draw_wave_icon(GContext *ctx, GPoint origin, GColor color) {
   }
 }
 
+#define THERM_ICON_W 10
+#define THERM_ICON_H 16
+static void prv_draw_thermometer_icon(GContext *ctx, GPoint origin, GColor color) {
+  GRect stem = GRect(origin.x + 3, origin.y, 4, THERM_ICON_H - 6);
+  graphics_context_set_stroke_color(ctx, color);
+  graphics_context_set_stroke_width(ctx, 1);
+  graphics_draw_round_rect(ctx, stem, 2);
+  graphics_context_set_fill_color(ctx, color);
+  graphics_fill_circle(ctx, GPoint(origin.x + 5, origin.y + THERM_ICON_H - 5), 5);
+  graphics_fill_rect(ctx, GRect(origin.x + 4, origin.y + 3, 2, THERM_ICON_H - 8), 0, GCornerNone);
+}
+
+#define TAPE_ICON_W 16
+#define TAPE_ICON_H 10
+static void prv_draw_tape_icon(GContext *ctx, GPoint origin, GColor color) {
+  graphics_context_set_stroke_color(ctx, color);
+  graphics_context_set_stroke_width(ctx, 1);
+  int16_t base_y = origin.y + TAPE_ICON_H - 2;
+  graphics_draw_line(ctx, GPoint(origin.x, base_y), GPoint(origin.x + TAPE_ICON_W, base_y));
+  for (int16_t x = 0; x <= TAPE_ICON_W; x += 4) {
+    int16_t tick_h = (x % 8 == 0) ? 6 : 3;
+    graphics_draw_line(ctx, GPoint(origin.x + x, base_y), GPoint(origin.x + x, base_y - tick_h));
+  }
+}
+
 #define COLOR_STALE PBL_IF_COLOR_ELSE(GColorYellow, GColorWhite)
 #define CLOCK_ICON_RADIUS 5
 static void prv_draw_clock_icon(GContext *ctx, GPoint center, GColor color) {
@@ -553,6 +579,18 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
     GColorWhite, GTextAlignmentLeft);
 }
 
+static void prv_draw_now_row(GContext *ctx, GRect frame, const char *label, int16_t icon_x,
+                             void (*icon_fn)(GContext *, GPoint, GColor), int16_t icon_h,
+                             const char *value) {
+  prv_draw_text(ctx, label, s_large_label_font,
+    GRect(frame.origin.x, frame.origin.y, frame.size.w, frame.size.h), COLOR_MUTED,
+    GTextAlignmentLeft);
+
+  icon_fn(ctx, GPoint(icon_x, frame.origin.y + (frame.size.h - icon_h) / 2), GColorWhite);
+
+  prv_draw_text(ctx, value, s_large_detail_font, frame, GColorWhite, GTextAlignmentRight);
+}
+
 static void prv_draw_now_card(GContext *ctx, GRect frame) {
   char height_text[16], wave_text[16], temp_text[16];
   prv_format_height(height_text, sizeof(height_text), s_current_value);
@@ -572,47 +610,46 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   prv_draw_text(ctx, s_rising ? "Rising" : "Falling", s_label_font,
     GRect(x + 70, header_y, frame.size.w - 88, header_h), trend_color, GTextAlignmentLeft);
 
-  int16_t value_y = header_y + header_h;
-  int16_t value_h = frame.size.h - PAGE_MARGIN - (value_y - frame.origin.y);
-  int16_t row_h = 30;
-  int16_t row_y = value_y + (value_h - row_h) / 2;
-  int16_t avail_w = frame.size.w - 18;
-  int16_t icon_gap = 3;
-  GSize w1 = graphics_text_layout_get_content_size(temp_text, s_large_detail_font,
-    GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  GSize w2_text = graphics_text_layout_get_content_size(wave_text, s_large_detail_font,
-    GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  int16_t w2 = WAVE_ICON_W + icon_gap + w2_text.w;
-  GSize w3 = graphics_text_layout_get_content_size(height_text, s_large_detail_font,
-    GRect(0, 0, avail_w, row_h + 8), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
-  int16_t gap = (avail_w - w1.w - w2 - w3.w) / 2;
-  if (gap < 0) gap = 0;
-  prv_draw_text(ctx, temp_text, s_large_detail_font,
-    GRect(x, row_y, w1.w, row_h), GColorWhite, GTextAlignmentLeft);
-  int16_t wave_x = x + w1.w + gap;
-  prv_draw_wave_icon(ctx, GPoint(wave_x, row_y + (row_h - WAVE_ICON_H) / 2 + 5), GColorWhite);
-  prv_draw_text(ctx, wave_text, s_large_detail_font,
-    GRect(wave_x + WAVE_ICON_W + icon_gap, row_y, w2_text.w, row_h), GColorWhite, GTextAlignmentLeft);
-  prv_draw_text(ctx, height_text, s_large_detail_font,
-    GRect(x + w1.w + gap + w2 + gap, row_y, w3.w, row_h), GColorWhite, GTextAlignmentLeft);
+  int16_t rows_y = header_y + header_h;
+  int16_t rows_h = frame.origin.y + frame.size.h - PAGE_MARGIN - rows_y;
+  int16_t row_h = rows_h / 3;
+  int16_t row_w = frame.size.w - 18;
+
+  GSize widest_label = graphics_text_layout_get_content_size("Waves", s_large_label_font,
+    GRect(0, 0, row_w, row_h), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+  int16_t icon_x = x + widest_label.w + 4;
+
+  prv_draw_now_row(ctx, GRect(x, rows_y, row_w, row_h), "Water", icon_x,
+    prv_draw_thermometer_icon, THERM_ICON_H, temp_text);
+  prv_draw_now_row(ctx, GRect(x, rows_y + row_h, row_w, row_h), "Waves", icon_x,
+    prv_draw_wave_icon, WAVE_ICON_H, wave_text);
+  prv_draw_now_row(ctx, GRect(x, rows_y + row_h * 2, row_w, row_h), "Tide", icon_x,
+    prv_draw_tape_icon, TAPE_ICON_H, height_text);
 }
 
-static void prv_draw_now_next_page(GContext *ctx, GRect bounds) {
-  int16_t content_w = bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W;
+static void prv_draw_now_page(GContext *ctx, GRect bounds) {
   int16_t top_margin = 3;
   int16_t bottom_margin = PAGE_MARGIN;
-  int16_t now_h = 84;
-  GRect now_card = GRect(PAGE_MARGIN, top_margin, content_w, now_h);
-  GRect next_card = GRect(PAGE_MARGIN, top_margin + now_h + CARD_GAP, content_w,
-    bounds.size.h - top_margin - bottom_margin - now_h - CARD_GAP);
+  GRect content = GRect(PAGE_MARGIN, top_margin, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
+    bounds.size.h - top_margin - bottom_margin);
+  int16_t bar_w = content.size.w / 10;
+  GRect bar_frame = GRect(content.origin.x, content.origin.y, bar_w, content.size.h);
+  GRect now_card = GRect(content.origin.x + bar_w + TIDE_BAR_GAP, content.origin.y,
+    content.size.w - bar_w - TIDE_BAR_GAP, content.size.h);
+  prv_draw_tide_bar(ctx, bar_frame);
   prv_draw_now_card(ctx, now_card);
-  prv_draw_event_card(ctx, next_card, 0, "NEXT", EventCardLayoutNext);
 }
 
 static void prv_draw_then_page(GContext *ctx, GRect bounds) {
-  GRect card = GRect(PAGE_MARGIN, PAGE_MARGIN, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
-    bounds.size.h - PAGE_MARGIN * 2);
-  prv_draw_event_card(ctx, card, 1, "THEN", EventCardLayoutLarge);
+  int16_t content_w = bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W;
+  int16_t top_margin = 3;
+  int16_t bottom_margin = PAGE_MARGIN;
+  int16_t next_h = 84;
+  GRect next_card = GRect(PAGE_MARGIN, top_margin, content_w, next_h);
+  GRect then_card = GRect(PAGE_MARGIN, top_margin + next_h + CARD_GAP, content_w,
+    bounds.size.h - top_margin - bottom_margin - next_h - CARD_GAP);
+  prv_draw_event_card(ctx, next_card, 0, "NEXT", EventCardLayoutNext);
+  prv_draw_event_card(ctx, then_card, 1, "THEN", EventCardLayoutNext);
 }
 
 static void prv_draw_later_page(GContext *ctx, GRect bounds) {
@@ -645,7 +682,7 @@ static void prv_draw_empty_page(GContext *ctx, GRect bounds) {
 }
 
 static GColor prv_page_background_color(void) {
-  if (s_page == TidePageNowNext) {
+  if (s_page == TidePageNow) {
     return COLOR_NOW_CARD;
   }
   if (s_page == TidePageThen && s_event_count > 1) {
@@ -678,8 +715,8 @@ static void prv_content_update_proc(Layer *layer, GContext *ctx) {
     case TidePageOverview:
       prv_draw_overview_page(ctx, bounds);
       break;
-    case TidePageNowNext:
-      prv_draw_now_next_page(ctx, bounds);
+    case TidePageNow:
+      prv_draw_now_page(ctx, bounds);
       break;
     case TidePageThen:
       prv_draw_then_page(ctx, bounds);
@@ -882,7 +919,7 @@ static void prv_down_click_handler(ClickRecognizerRef recognizer, void *context)
 }
 
 static void prv_select_click_handler(ClickRecognizerRef recognizer, void *context) {
-  prv_change_page(TidePageNowNext);
+  prv_change_page(TidePageNow);
 }
 
 static void prv_click_config_provider(void *context) {
@@ -915,6 +952,10 @@ static void prv_window_load(Window *window) {
     FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_24_BOLD,
     FONT_KEY_GOTHIC_24_BOLD, FONT_KEY_GOTHIC_28_BOLD, FONT_KEY_GOTHIC_28_BOLD,
     FONT_KEY_GOTHIC_24_BOLD));
+  s_large_label_font = fonts_get_system_font(PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
+    FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_24,
+    FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_28, FONT_KEY_GOTHIC_28,
+    FONT_KEY_GOTHIC_24));
   const int16_t top_pad = PBL_IF_ROUND_ELSE(8, 0);
   const int16_t header_h = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     24, 24, 24, 24, 32, 32, 24);
