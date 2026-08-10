@@ -387,7 +387,7 @@ static void prv_draw_wave_icon(GContext *ctx, GPoint origin, GColor color) {
   }
 }
 
-#define COLOR_STALE PBL_IF_COLOR_ELSE(GColorRed, GColorWhite)
+#define COLOR_STALE PBL_IF_COLOR_ELSE(GColorYellow, GColorWhite)
 #define CLOCK_ICON_RADIUS 5
 static void prv_draw_clock_icon(GContext *ctx, GPoint center, GColor color) {
   graphics_context_set_stroke_color(ctx, color);
