@@ -15,6 +15,8 @@
 #define CARD_GAP 8
 #define STALE_ICON_W 14
 #define STALE_ICON_GAP 4
+#define TIDE_BAR_SEGMENTS 5
+#define TIDE_BAR_GAP 4
 #define WAKEUP_INTERVAL_SECONDS (60 * 60)
 #define STALE_THRESHOLD_SECONDS (80 * 60)
 #define AUTO_CLOSE_DELAY_MS 5000
@@ -88,6 +90,7 @@ static int16_t s_current_minutes_at_sync;
 #define COLOR_NOW_CARD  PBL_IF_COLOR_ELSE(GColorMidnightGreen, GColorBlack)
 #define COLOR_HIGH_CARD PBL_IF_COLOR_ELSE(GColorDarkGreen, GColorBlack)
 #define COLOR_LOW_CARD  PBL_IF_COLOR_ELSE(GColorBulgarianRose, GColorBlack)
+#define COLOR_SAND      PBL_IF_COLOR_ELSE(GColorChromeYellow, GColorWhite)
 
 static GPoint s_arrow_up_pts[] = {{ARROW_W / 2, 0}, {0, ARROW_H}, {ARROW_W, ARROW_H}};
 static GPathInfo s_arrow_up_info = {3, s_arrow_up_pts};
@@ -293,10 +296,22 @@ static void prv_draw_chart_event_label(GContext *ctx, const char *text,
     GRect(x, y, label_w, 30), color, GTextAlignmentCenter);
 }
 
+static void prv_tide_min_max(int16_t *min_out, int16_t *max_out) {
+  int16_t min_v = s_tide_values[0], max_v = s_tide_values[0];
+  for (int16_t i = 1; i < s_tide_count; i++) {
+    if (s_tide_values[i] < min_v) min_v = s_tide_values[i];
+    if (s_tide_values[i] > max_v) max_v = s_tide_values[i];
+  }
+  if (max_v == min_v) max_v += 1;
+  *min_out = min_v;
+  *max_out = max_v;
+}
+
 static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
-  const int16_t mx = labels ? 26 : 6;
-  const int16_t my = 6;
-  const int16_t w = frame.size.w - mx * 2;
+  const int16_t mx_left = (labels ? 16 : 4) + 2;
+  const int16_t mx_right = labels ? 6 : 4;
+  const int16_t my = 2;
+  const int16_t w = frame.size.w - mx_left - mx_right;
   const int16_t h = frame.size.h - my * 2;
   const int16_t label_h = labels ? 32 : 0;
   const int16_t plot_y = frame.origin.y + my + label_h;
@@ -305,26 +320,22 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
 
   if (s_tide_count < 2) {
     graphics_context_set_stroke_color(ctx, COLOR_DIM);
-    graphics_draw_rect(ctx, GRect(frame.origin.x + mx, frame.origin.y + my, w, h));
+    graphics_draw_rect(ctx, GRect(frame.origin.x + mx_left, frame.origin.y + my, w, h));
     return;
   }
 
-  int16_t min_v = s_tide_values[0], max_v = s_tide_values[0];
-  for (int16_t i = 1; i < s_tide_count; i++) {
-    if (s_tide_values[i] < min_v) min_v = s_tide_values[i];
-    if (s_tide_values[i] > max_v) max_v = s_tide_values[i];
-  }
-  if (max_v == min_v) max_v += 1;
+  int16_t min_v, max_v;
+  prv_tide_min_max(&min_v, &max_v);
 
   int16_t axis_y = plot_y + plot_h / 2;
   graphics_context_set_stroke_color(ctx, COLOR_DIM);
-  graphics_draw_line(ctx, GPoint(frame.origin.x + mx, axis_y),
-    GPoint(frame.origin.x + mx + w, axis_y));
+  graphics_draw_line(ctx, GPoint(frame.origin.x + mx_left, axis_y),
+    GPoint(frame.origin.x + mx_left + w, axis_y));
 
   graphics_context_set_stroke_color(ctx, COLOR_BLUE_LINE);
-  GPoint prev = GPoint(frame.origin.x + mx, plot_y + plot_h);
+  GPoint prev = GPoint(frame.origin.x + mx_left, plot_y + plot_h);
   for (int16_t i = 0; i < s_tide_count; i++) {
-    int16_t x = frame.origin.x + mx + (w * i / (s_tide_count - 1));
+    int16_t x = frame.origin.x + mx_left + (w * i / (s_tide_count - 1));
     int16_t y = plot_y + plot_h -
       ((s_tide_values[i] - min_v) * plot_h / (max_v - min_v));
     GPoint pt = GPoint(x, y);
@@ -336,7 +347,7 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
     prev = pt;
   }
 
-  int16_t cx = frame.origin.x + mx + prv_current_sample_x(w);
+  int16_t cx = frame.origin.x + mx_left + prv_current_sample_x(w);
   int16_t cy = plot_y + plot_h -
     ((s_current_value - min_v) * plot_h / (max_v - min_v));
   graphics_context_set_fill_color(ctx, COLOR_NOW_HALO);
@@ -346,7 +357,7 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
 
   for (int16_t e = 0; e < s_event_count; e++) {
     int16_t index = s_event_indices[e];
-    int16_t ex = frame.origin.x + mx + (w * index / (s_tide_count - 1));
+    int16_t ex = frame.origin.x + mx_left + (w * index / (s_tide_count - 1));
     int16_t ey = plot_y + plot_h -
       ((s_tide_values[index] - min_v) * plot_h / (max_v - min_v));
     prv_draw_chart_event(ctx, s_event_highs[e], ex, ey);
@@ -357,6 +368,83 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
     GColor label_color = s_event_highs[e] ? COLOR_HIGH : COLOR_LOW;
     int16_t ly = s_event_highs[e] ? frame.origin.y + my : plot_y + plot_h + 3;
     prv_draw_chart_event_label(ctx, event_time, ex, ly, label_color, frame);
+  }
+}
+
+#define TIDE_BAR_WAVE_PERIOD 10
+#define TIDE_BAR_WAVE_AMP 3
+#define TIDE_BAR_WAVE_ROW_H 7
+#define TIDE_BAR_SAND_ROW_H 6
+#define TIDE_BAR_SAND_SPACING 7
+#define TIDE_BAR_SAND_SHIFT 3
+#define TIDE_BAR_SAND_RADIUS 1
+
+static void prv_draw_tide_bar_wave_row(GContext *ctx, GRect cell, int16_t row_y,
+                                       int16_t row_index) {
+  int16_t x_offset = (row_index % 2 == 1) ? TIDE_BAR_WAVE_PERIOD / 2 : 0;
+  graphics_context_set_stroke_color(ctx, COLOR_BLUE_LINE);
+  graphics_context_set_stroke_width(ctx, 1);
+  int16_t start_x = cell.origin.x - TIDE_BAR_WAVE_PERIOD + x_offset;
+  for (int16_t x = start_x; x < cell.origin.x + cell.size.w; x += TIDE_BAR_WAVE_PERIOD) {
+    GPoint p0 = GPoint(x, row_y);
+    GPoint p1 = GPoint(x + TIDE_BAR_WAVE_PERIOD / 2, row_y - TIDE_BAR_WAVE_AMP);
+    GPoint p2 = GPoint(x + TIDE_BAR_WAVE_PERIOD, row_y);
+    graphics_draw_line(ctx, p0, p1);
+    graphics_draw_line(ctx, p1, p2);
+  }
+}
+
+static void prv_draw_tide_bar_sand_row(GContext *ctx, GRect cell, int16_t row_y,
+                                       int16_t row_index) {
+  graphics_context_set_fill_color(ctx, COLOR_SAND);
+  int16_t shift = (row_index * TIDE_BAR_SAND_SHIFT) % TIDE_BAR_SAND_SPACING;
+  for (int16_t x = cell.origin.x + shift; x < cell.origin.x + cell.size.w;
+       x += TIDE_BAR_SAND_SPACING) {
+    graphics_fill_circle(ctx, GPoint(x, row_y), TIDE_BAR_SAND_RADIUS);
+  }
+}
+
+static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
+  if (s_tide_count < 2) {
+    graphics_context_set_stroke_color(ctx, COLOR_DIM);
+    graphics_draw_rect(ctx, frame);
+    return;
+  }
+
+  int16_t min_v, max_v;
+  prv_tide_min_max(&min_v, &max_v);
+
+  int32_t range = max_v - min_v;
+  int32_t filled = ((int32_t)(s_current_value - min_v) * TIDE_BAR_SEGMENTS + range / 2) / range;
+  if (filled < 0) filled = 0;
+  if (filled > TIDE_BAR_SEGMENTS) filled = TIDE_BAR_SEGMENTS;
+
+  int16_t cell_h = frame.size.h / TIDE_BAR_SEGMENTS;
+  int16_t y = frame.origin.y;
+  int16_t wave_row = 0;
+  int16_t sand_row = 0;
+
+  for (int16_t i = 0; i < TIDE_BAR_SEGMENTS; i++) {
+    bool is_last = (i == TIDE_BAR_SEGMENTS - 1);
+    int16_t h = is_last ? (frame.origin.y + frame.size.h - y) : cell_h;
+    GRect cell = GRect(frame.origin.x, y, frame.size.w, h);
+    bool is_sea = i < filled;
+
+    if (is_sea) {
+      for (int16_t ry = cell.origin.y + TIDE_BAR_WAVE_AMP + 2;
+           ry < cell.origin.y + cell.size.h; ry += TIDE_BAR_WAVE_ROW_H) {
+        prv_draw_tide_bar_wave_row(ctx, cell, ry, wave_row);
+        wave_row++;
+      }
+    } else {
+      for (int16_t ry = cell.origin.y + TIDE_BAR_SAND_RADIUS + 2;
+           ry < cell.origin.y + cell.size.h; ry += TIDE_BAR_SAND_ROW_H) {
+        prv_draw_tide_bar_sand_row(ctx, cell, ry, sand_row);
+        sand_row++;
+      }
+    }
+
+    y += h;
   }
 }
 
@@ -539,7 +627,15 @@ static void prv_draw_overview_page(GContext *ctx, GRect bounds) {
   prv_draw_text(ctx, "NEXT 24H", s_label_font,
     GRect(bounds.size.w / 2 - 2, 0, bounds.size.w / 2 - 18, 28), COLOR_DIM,
     GTextAlignmentRight);
-  prv_draw_chart(ctx, GRect(2, 30, bounds.size.w - 18, bounds.size.h - 36), true);
+
+  GRect content = GRect(1, 28, bounds.size.w - 13, bounds.size.h - 30);
+  int16_t bar_w = content.size.w / 10;
+  GRect bar_frame = GRect(content.origin.x, content.origin.y, bar_w, content.size.h);
+  GRect chart_frame = GRect(content.origin.x + bar_w + TIDE_BAR_GAP, content.origin.y,
+    content.size.w - bar_w - TIDE_BAR_GAP, content.size.h);
+
+  prv_draw_tide_bar(ctx, bar_frame);
+  prv_draw_chart(ctx, chart_frame, true);
 }
 
 static void prv_draw_empty_page(GContext *ctx, GRect bounds) {
