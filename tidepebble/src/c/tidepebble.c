@@ -444,14 +444,9 @@ static void prv_draw_tide_bar_sand_row(GContext *ctx, GRect cell, int16_t row_y,
   int16_t left = cell.origin.x;
   int16_t right = cell.origin.x + cell.size.w;
   int16_t start_x = cell.origin.x - TIDE_BAR_SAND_SPACING + shift;
-  int16_t prev_dot_x = left - TIDE_BAR_SAND_RADIUS * 4;
   for (int16_t x = start_x; x < right; x += TIDE_BAR_SAND_SPACING) {
-    int16_t dot_x = x;
-    if (dot_x > right - TIDE_BAR_SAND_RADIUS - 1) dot_x = right - TIDE_BAR_SAND_RADIUS - 1;
-    if (dot_x < left + TIDE_BAR_SAND_RADIUS) dot_x = left + TIDE_BAR_SAND_RADIUS;
-    if (dot_x <= prev_dot_x + TIDE_BAR_SAND_RADIUS * 2) continue;
-    prev_dot_x = dot_x;
-    graphics_fill_circle(ctx, GPoint(dot_x, row_y), TIDE_BAR_SAND_RADIUS);
+    if (x - TIDE_BAR_SAND_RADIUS < left || x + TIDE_BAR_SAND_RADIUS > right - 1) continue;
+    graphics_fill_circle(ctx, GPoint(x, row_y), TIDE_BAR_SAND_RADIUS);
   }
 }
 
@@ -524,6 +519,7 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
       GPoint tail_end = GPoint(center_x, arrow_y - ARROW_BIG_TAIL_LEN);
       graphics_draw_line(ctx, tail_start, tail_end);
     }
+    graphics_context_set_stroke_width(ctx, 1);
   }
 }
 
