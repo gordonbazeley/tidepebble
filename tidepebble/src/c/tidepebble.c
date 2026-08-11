@@ -9,6 +9,10 @@
 #define STATUS_MAX_LEN 48
 #define ARROW_W 8
 #define ARROW_H 7
+#define ARROW_BIG_W 22
+#define ARROW_BIG_H 12
+#define ARROW_BIG_TAIL_LEN 8
+#define ARROW_BIG_TAIL_WIDTH 5
 #define DOUBLE_TAP_MS 500
 #define PAGE_MARGIN 8
 #define PAGE_DOTS_W 20
@@ -101,6 +105,14 @@ static GPath *s_arrow_up_path;
 static GPoint s_arrow_down_pts[] = {{0, 0}, {ARROW_W, 0}, {ARROW_W / 2, ARROW_H}};
 static GPathInfo s_arrow_down_info = {3, s_arrow_down_pts};
 static GPath *s_arrow_down_path;
+static GPoint s_arrow_big_up_pts[] =
+  {{ARROW_BIG_W / 2, 0}, {0, ARROW_BIG_H}, {ARROW_BIG_W, ARROW_BIG_H}};
+static GPathInfo s_arrow_big_up_info = {3, s_arrow_big_up_pts};
+static GPath *s_arrow_big_up_path;
+static GPoint s_arrow_big_down_pts[] =
+  {{0, 0}, {ARROW_BIG_W, 0}, {ARROW_BIG_W / 2, ARROW_BIG_H}};
+static GPathInfo s_arrow_big_down_info = {3, s_arrow_big_down_pts};
+static GPath *s_arrow_big_down_path;
 
 static int8_t prv_tide_value_digit(char value) {
   if (value >= 'A' && value <= 'Z') return value - 'A';
@@ -374,7 +386,8 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
   }
 }
 
-#define TIDE_BAR_PADDING 2
+#define TIDE_BAR_PADDING_X -2
+#define TIDE_BAR_PADDING_Y 4
 #define TIDE_BAR_WAVE_PERIOD 10
 #define TIDE_BAR_WAVE_AMP 3
 #define TIDE_BAR_WAVE_ROW_H 7
@@ -383,8 +396,9 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
 #define TIDE_BAR_SAND_SHIFT 3
 #define TIDE_BAR_SAND_RADIUS 1
 
-static void prv_draw_line_clipped_x(GContext *ctx, GPoint p0, GPoint p1, int16_t max_x) {
-  if (p0.x > max_x && p1.x > max_x) return;
+static void prv_draw_line_clipped_x(GContext *ctx, GPoint p0, GPoint p1, int16_t min_x,
+                                    int16_t max_x) {
+  if ((p0.x > max_x && p1.x > max_x) || (p0.x < min_x && p1.x < min_x)) return;
   if (p1.x > max_x) {
     int16_t dx = p1.x - p0.x;
     if (dx != 0) p1.y = p0.y + (int16_t)((int32_t)(p1.y - p0.y) * (max_x - p0.x) / dx);
@@ -394,6 +408,15 @@ static void prv_draw_line_clipped_x(GContext *ctx, GPoint p0, GPoint p1, int16_t
     if (dx != 0) p0.y = p1.y + (int16_t)((int32_t)(p0.y - p1.y) * (max_x - p1.x) / dx);
     p0.x = max_x;
   }
+  if (p1.x < min_x) {
+    int16_t dx = p1.x - p0.x;
+    if (dx != 0) p1.y = p0.y + (int16_t)((int32_t)(p1.y - p0.y) * (min_x - p0.x) / dx);
+    p1.x = min_x;
+  } else if (p0.x < min_x) {
+    int16_t dx = p1.x - p0.x;
+    if (dx != 0) p0.y = p1.y + (int16_t)((int32_t)(p0.y - p1.y) * (min_x - p1.x) / dx);
+    p0.x = min_x;
+  }
   graphics_draw_line(ctx, p0, p1);
 }
 
@@ -402,14 +425,15 @@ static void prv_draw_tide_bar_wave_row(GContext *ctx, GRect cell, int16_t row_y,
   int16_t x_offset = (row_index % 2 == 1) ? TIDE_BAR_WAVE_PERIOD / 2 : 0;
   graphics_context_set_stroke_color(ctx, COLOR_BLUE_LINE);
   graphics_context_set_stroke_width(ctx, 1);
+  int16_t left = cell.origin.x;
   int16_t right = cell.origin.x + cell.size.w - 1;
   int16_t start_x = cell.origin.x - TIDE_BAR_WAVE_PERIOD + x_offset;
   for (int16_t x = start_x; x < right; x += TIDE_BAR_WAVE_PERIOD) {
     GPoint p0 = GPoint(x, row_y);
     GPoint p1 = GPoint(x + TIDE_BAR_WAVE_PERIOD / 2, row_y - TIDE_BAR_WAVE_AMP);
     GPoint p2 = GPoint(x + TIDE_BAR_WAVE_PERIOD, row_y);
-    prv_draw_line_clipped_x(ctx, p0, p1, right);
-    prv_draw_line_clipped_x(ctx, p1, p2, right);
+    prv_draw_line_clipped_x(ctx, p0, p1, left, right);
+    prv_draw_line_clipped_x(ctx, p1, p2, left, right);
   }
 }
 
@@ -417,18 +441,23 @@ static void prv_draw_tide_bar_sand_row(GContext *ctx, GRect cell, int16_t row_y,
                                        int16_t row_index) {
   graphics_context_set_fill_color(ctx, COLOR_SAND);
   int16_t shift = (row_index * TIDE_BAR_SAND_SHIFT) % TIDE_BAR_SAND_SPACING;
+  int16_t left = cell.origin.x;
   int16_t right = cell.origin.x + cell.size.w;
   int16_t start_x = cell.origin.x - TIDE_BAR_SAND_SPACING + shift;
+  int16_t prev_dot_x = left - TIDE_BAR_SAND_RADIUS * 4;
   for (int16_t x = start_x; x < right; x += TIDE_BAR_SAND_SPACING) {
     int16_t dot_x = x;
     if (dot_x > right - TIDE_BAR_SAND_RADIUS - 1) dot_x = right - TIDE_BAR_SAND_RADIUS - 1;
+    if (dot_x < left + TIDE_BAR_SAND_RADIUS) dot_x = left + TIDE_BAR_SAND_RADIUS;
+    if (dot_x <= prev_dot_x + TIDE_BAR_SAND_RADIUS * 2) continue;
+    prev_dot_x = dot_x;
     graphics_fill_circle(ctx, GPoint(dot_x, row_y), TIDE_BAR_SAND_RADIUS);
   }
 }
 
 static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
-  GRect padded = GRect(frame.origin.x + TIDE_BAR_PADDING, frame.origin.y + TIDE_BAR_PADDING,
-    frame.size.w - TIDE_BAR_PADDING * 2, frame.size.h - TIDE_BAR_PADDING * 2);
+  GRect padded = GRect(frame.origin.x + TIDE_BAR_PADDING_X, frame.origin.y + TIDE_BAR_PADDING_Y,
+    frame.size.w - TIDE_BAR_PADDING_X * 2, frame.size.h - TIDE_BAR_PADDING_Y * 2);
 
   if (s_tide_count < 2) {
     graphics_context_set_stroke_color(ctx, COLOR_DIM);
@@ -470,6 +499,31 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
     }
 
     y += h;
+  }
+
+  if (filled > 0 && filled < TIDE_BAR_SEGMENTS) {
+    int16_t boundary_y = padded.origin.y + (int16_t)filled * cell_h;
+    GPath *arrow = s_rising ? s_arrow_big_up_path : s_arrow_big_down_path;
+    GColor arrow_color = s_rising ? COLOR_HIGH : COLOR_LOW;
+    int16_t arrow_x = padded.origin.x + padded.size.w / 2 - ARROW_BIG_W / 2;
+    int16_t arrow_y = boundary_y - ARROW_BIG_H / 2;
+    int16_t center_x = arrow_x + ARROW_BIG_W / 2;
+
+    graphics_context_set_fill_color(ctx, arrow_color);
+    gpath_move_to(arrow, GPoint(arrow_x, arrow_y));
+    gpath_draw_filled(ctx, arrow);
+
+    graphics_context_set_stroke_color(ctx, arrow_color);
+    graphics_context_set_stroke_width(ctx, ARROW_BIG_TAIL_WIDTH);
+    if (s_rising) {
+      GPoint tail_start = GPoint(center_x, arrow_y + ARROW_BIG_H);
+      GPoint tail_end = GPoint(center_x, arrow_y + ARROW_BIG_H + ARROW_BIG_TAIL_LEN);
+      graphics_draw_line(ctx, tail_start, tail_end);
+    } else {
+      GPoint tail_start = GPoint(center_x, arrow_y);
+      GPoint tail_end = GPoint(center_x, arrow_y - ARROW_BIG_TAIL_LEN);
+      graphics_draw_line(ctx, tail_start, tail_end);
+    }
   }
 }
 
@@ -1034,6 +1088,8 @@ static void prv_window_unload(Window *window) {
 static void prv_init(void) {
   s_arrow_up_path = gpath_create(&s_arrow_up_info);
   s_arrow_down_path = gpath_create(&s_arrow_down_info);
+  s_arrow_big_up_path = gpath_create(&s_arrow_big_up_info);
+  s_arrow_big_down_path = gpath_create(&s_arrow_big_down_info);
 
   s_background_refresh_enabled = persist_exists(PERSIST_KEY_BACKGROUND_REFRESH)
     ? persist_read_bool(PERSIST_KEY_BACKGROUND_REFRESH) : true;
@@ -1082,6 +1138,8 @@ static void prv_deinit(void) {
   window_destroy(s_window);
   gpath_destroy(s_arrow_up_path);
   gpath_destroy(s_arrow_down_path);
+  gpath_destroy(s_arrow_big_up_path);
+  gpath_destroy(s_arrow_big_down_path);
 }
 
 int main(void) {
