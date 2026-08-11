@@ -380,18 +380,33 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
 #define TIDE_BAR_SAND_SHIFT 3
 #define TIDE_BAR_SAND_RADIUS 1
 
+static void prv_draw_line_clipped_x(GContext *ctx, GPoint p0, GPoint p1, int16_t max_x) {
+  if (p0.x > max_x && p1.x > max_x) return;
+  if (p1.x > max_x) {
+    int16_t dx = p1.x - p0.x;
+    if (dx != 0) p1.y = p0.y + (int16_t)((int32_t)(p1.y - p0.y) * (max_x - p0.x) / dx);
+    p1.x = max_x;
+  } else if (p0.x > max_x) {
+    int16_t dx = p1.x - p0.x;
+    if (dx != 0) p0.y = p1.y + (int16_t)((int32_t)(p0.y - p1.y) * (max_x - p1.x) / dx);
+    p0.x = max_x;
+  }
+  graphics_draw_line(ctx, p0, p1);
+}
+
 static void prv_draw_tide_bar_wave_row(GContext *ctx, GRect cell, int16_t row_y,
                                        int16_t row_index) {
   int16_t x_offset = (row_index % 2 == 1) ? TIDE_BAR_WAVE_PERIOD / 2 : 0;
   graphics_context_set_stroke_color(ctx, COLOR_BLUE_LINE);
   graphics_context_set_stroke_width(ctx, 1);
+  int16_t right = cell.origin.x + cell.size.w - 1;
   int16_t start_x = cell.origin.x - TIDE_BAR_WAVE_PERIOD + x_offset;
-  for (int16_t x = start_x; x < cell.origin.x + cell.size.w; x += TIDE_BAR_WAVE_PERIOD) {
+  for (int16_t x = start_x; x < right; x += TIDE_BAR_WAVE_PERIOD) {
     GPoint p0 = GPoint(x, row_y);
     GPoint p1 = GPoint(x + TIDE_BAR_WAVE_PERIOD / 2, row_y - TIDE_BAR_WAVE_AMP);
     GPoint p2 = GPoint(x + TIDE_BAR_WAVE_PERIOD, row_y);
-    graphics_draw_line(ctx, p0, p1);
-    graphics_draw_line(ctx, p1, p2);
+    prv_draw_line_clipped_x(ctx, p0, p1, right);
+    prv_draw_line_clipped_x(ctx, p1, p2, right);
   }
 }
 
@@ -399,9 +414,12 @@ static void prv_draw_tide_bar_sand_row(GContext *ctx, GRect cell, int16_t row_y,
                                        int16_t row_index) {
   graphics_context_set_fill_color(ctx, COLOR_SAND);
   int16_t shift = (row_index * TIDE_BAR_SAND_SHIFT) % TIDE_BAR_SAND_SPACING;
-  for (int16_t x = cell.origin.x + shift; x < cell.origin.x + cell.size.w;
-       x += TIDE_BAR_SAND_SPACING) {
-    graphics_fill_circle(ctx, GPoint(x, row_y), TIDE_BAR_SAND_RADIUS);
+  int16_t right = cell.origin.x + cell.size.w;
+  int16_t start_x = cell.origin.x - TIDE_BAR_SAND_SPACING + shift;
+  for (int16_t x = start_x; x < right; x += TIDE_BAR_SAND_SPACING) {
+    int16_t dot_x = x;
+    if (dot_x > right - TIDE_BAR_SAND_RADIUS - 1) dot_x = right - TIDE_BAR_SAND_RADIUS - 1;
+    graphics_fill_circle(ctx, GPoint(dot_x, row_y), TIDE_BAR_SAND_RADIUS);
   }
 }
 
@@ -447,6 +465,13 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
 
     y += h;
   }
+}
+
+static GRect prv_draw_tide_bar_for_content(GContext *ctx, GRect content) {
+  int16_t bar_w = content.size.w / 10;
+  GRect bar_frame = GRect(content.origin.x, content.origin.y, bar_w, content.size.h);
+  prv_draw_tide_bar(ctx, bar_frame);
+  return bar_frame;
 }
 
 static void prv_draw_event_heading(GContext *ctx, GRect frame, const char *prefix,
@@ -598,7 +623,7 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   prv_format_sea_temp(temp_text, sizeof(temp_text), s_sea_temp);
 
   prv_draw_card_background(ctx, frame, GColorBlack);
-  int16_t x = frame.origin.x + 12;
+  int16_t x = frame.origin.x + 6;
   int16_t header_y = frame.origin.y + PAGE_MARGIN;
   int16_t header_h = 28;
   prv_draw_text(ctx, "NOW", s_label_font, GRect(x, header_y, 52, header_h),
@@ -632,11 +657,14 @@ static void prv_draw_now_page(GContext *ctx, GRect bounds) {
   int16_t bottom_margin = PAGE_MARGIN;
   GRect content = GRect(PAGE_MARGIN, top_margin, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
     bounds.size.h - top_margin - bottom_margin);
-  int16_t bar_w = content.size.w / 10;
-  GRect bar_frame = GRect(content.origin.x, content.origin.y, bar_w, content.size.h);
-  GRect now_card = GRect(content.origin.x + bar_w + TIDE_BAR_GAP, content.origin.y,
-    content.size.w - bar_w - TIDE_BAR_GAP, content.size.h);
-  prv_draw_tide_bar(ctx, bar_frame);
+  GRect bar_content = GRect(content.origin.x, content.origin.y, content.size.w,
+    bounds.size.h - top_margin);
+  GRect bg_frame = GRect(0, bar_content.origin.y, bar_content.origin.x + bar_content.size.w,
+    bar_content.size.h);
+  prv_draw_card_background(ctx, bg_frame, GColorBlack);
+  GRect bar_frame = prv_draw_tide_bar_for_content(ctx, bar_content);
+  GRect now_card = GRect(content.origin.x + bar_frame.size.w + TIDE_BAR_GAP, content.origin.y,
+    content.size.w - bar_frame.size.w - TIDE_BAR_GAP, content.size.h);
   prv_draw_now_card(ctx, now_card);
 }
 
@@ -665,13 +693,12 @@ static void prv_draw_overview_page(GContext *ctx, GRect bounds) {
     GRect(bounds.size.w / 2 - 2, 0, bounds.size.w / 2 - 18, 28), COLOR_DIM,
     GTextAlignmentRight);
 
-  GRect content = GRect(1, 28, bounds.size.w - 13, bounds.size.h - 30);
-  int16_t bar_w = content.size.w / 10;
-  GRect bar_frame = GRect(content.origin.x, content.origin.y, bar_w, content.size.h);
-  GRect chart_frame = GRect(content.origin.x + bar_w + TIDE_BAR_GAP, content.origin.y,
-    content.size.w - bar_w - TIDE_BAR_GAP, content.size.h);
+  GRect content = GRect(PAGE_MARGIN, 28, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
+    bounds.size.h - 30);
+  GRect bar_frame = prv_draw_tide_bar_for_content(ctx, content);
+  GRect chart_frame = GRect(content.origin.x + bar_frame.size.w + TIDE_BAR_GAP, content.origin.y,
+    content.size.w - bar_frame.size.w - TIDE_BAR_GAP, content.size.h);
 
-  prv_draw_tide_bar(ctx, bar_frame);
   prv_draw_chart(ctx, chart_frame, true);
 }
 
