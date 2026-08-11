@@ -13,8 +13,10 @@
   };
   var SELECTED_LOCATION_KEY = 'tide_selected_location_v1';
   var BACKGROUND_REFRESH_KEY = 'tide_background_refresh_v1';
+  var BEACH_MODE_KEY = 'tide_beach_mode_v1';
   var s_selectedLocation = null;
   var s_backgroundRefresh = true;
+  var s_beachMode = false;
 
   function loadBackgroundRefresh() {
     var raw = localStorage.getItem(BACKGROUND_REFRESH_KEY);
@@ -24,6 +26,16 @@
   function saveBackgroundRefresh(enabled) {
     s_backgroundRefresh = enabled;
     localStorage.setItem(BACKGROUND_REFRESH_KEY, enabled ? 'true' : 'false');
+  }
+
+  function loadBeachMode() {
+    var raw = localStorage.getItem(BEACH_MODE_KEY);
+    s_beachMode = raw === 'true';
+  }
+
+  function saveBeachMode(enabled) {
+    s_beachMode = enabled;
+    localStorage.setItem(BEACH_MODE_KEY, enabled ? 'true' : 'false');
   }
 
   function sendChunkSequence(chunks, waveChunks, index, currentMinutes, fallbackLabel) {
@@ -51,7 +63,8 @@
   function sendStatus(status, location) {
     var payload = {
       tide_status: status,
-      tide_background_refresh: s_backgroundRefresh ? 1 : 0
+      tide_background_refresh: s_backgroundRefresh ? 1 : 0,
+      tide_beach_mode: s_beachMode ? 1 : 0
     };
     if (location) {
       payload.tide_location = location;
@@ -209,7 +222,8 @@
           tide_current_minutes: currentMinutes,
           tide_wave_height: Math.round(waveH * 100),
           tide_sea_temp: Math.round(seaT * 10),
-          tide_background_refresh: s_backgroundRefresh ? 1 : 0
+          tide_background_refresh: s_backgroundRefresh ? 1 : 0,
+          tide_beach_mode: s_beachMode ? 1 : 0
         }, function() {
           setTimeout(function() {
             sendChunkSequence(chunks, waveChunks, 0, currentMinutes, label);
@@ -230,6 +244,7 @@
   function refresh() {
     loadSelectedLocation();
     loadBackgroundRefresh();
+    loadBeachMode();
     if (s_selectedLocation) {
       fetchTides({ coords: s_selectedLocation }, geocodingLabel(s_selectedLocation));
       return;
@@ -267,6 +282,9 @@
       if (typeof data.backgroundRefresh === 'boolean') {
         saveBackgroundRefresh(data.backgroundRefresh);
       }
+      if (typeof data.beachMode === 'boolean') {
+        saveBeachMode(data.beachMode);
+      }
       if (data.mode === 'gps' || data.usePhoneLocation) {
         clearSelectedLocation();
         refresh();
@@ -297,6 +315,7 @@
   Pebble.addEventListener('showConfiguration', function() {
     loadSelectedLocation();
     loadBackgroundRefresh();
+    loadBeachMode();
     var SETTINGS_HTML = require('./settings-html');
     var state = {
       mode: s_selectedLocation ? 'manual' : 'gps',
@@ -304,6 +323,7 @@
       lat: s_selectedLocation ? s_selectedLocation.latitude : null,
       lon: s_selectedLocation ? s_selectedLocation.longitude : null,
       backgroundRefresh: s_backgroundRefresh,
+      beachMode: s_beachMode,
     };
     var stateJson = JSON.stringify(state)
       .replace(/[<>&\u2028\u2029]/g, function(ch) {

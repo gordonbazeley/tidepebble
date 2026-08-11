@@ -29,6 +29,7 @@
 #define PERSIST_KEY_CURRENT_MINUTES_AT_SYNC 6
 #define PERSIST_KEY_LAST_SYNC_EPOCH 7
 #define PERSIST_KEY_BACKGROUND_REFRESH 8
+#define PERSIST_KEY_BEACH_MODE 9
 
 typedef enum {
   TidePageOverview = 0,
@@ -78,6 +79,7 @@ static bool s_waiting_for_double_tap;
 static AppTimer *s_close_timer;
 static bool s_is_stale;
 static bool s_background_refresh_enabled = true;
+static bool s_beach_mode = false;
 static time_t s_last_sync_epoch;
 static int16_t s_current_minutes_at_sync;
 
@@ -372,6 +374,7 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
   }
 }
 
+#define TIDE_BAR_PADDING 2
 #define TIDE_BAR_WAVE_PERIOD 10
 #define TIDE_BAR_WAVE_AMP 3
 #define TIDE_BAR_WAVE_ROW_H 7
@@ -424,9 +427,12 @@ static void prv_draw_tide_bar_sand_row(GContext *ctx, GRect cell, int16_t row_y,
 }
 
 static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
+  GRect padded = GRect(frame.origin.x + TIDE_BAR_PADDING, frame.origin.y + TIDE_BAR_PADDING,
+    frame.size.w - TIDE_BAR_PADDING * 2, frame.size.h - TIDE_BAR_PADDING * 2);
+
   if (s_tide_count < 2) {
     graphics_context_set_stroke_color(ctx, COLOR_DIM);
-    graphics_draw_rect(ctx, frame);
+    graphics_draw_rect(ctx, padded);
     return;
   }
 
@@ -438,15 +444,15 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
   if (filled < 0) filled = 0;
   if (filled > TIDE_BAR_SEGMENTS) filled = TIDE_BAR_SEGMENTS;
 
-  int16_t cell_h = frame.size.h / TIDE_BAR_SEGMENTS;
-  int16_t y = frame.origin.y;
+  int16_t cell_h = padded.size.h / TIDE_BAR_SEGMENTS;
+  int16_t y = padded.origin.y;
   int16_t wave_row = 0;
   int16_t sand_row = 0;
 
   for (int16_t i = 0; i < TIDE_BAR_SEGMENTS; i++) {
     bool is_last = (i == TIDE_BAR_SEGMENTS - 1);
-    int16_t h = is_last ? (frame.origin.y + frame.size.h - y) : cell_h;
-    GRect cell = GRect(frame.origin.x, y, frame.size.w, h);
+    int16_t h = is_last ? (padded.origin.y + padded.size.h - y) : cell_h;
+    GRect cell = GRect(padded.origin.x, y, padded.size.w, h);
     bool is_sea = i < filled;
 
     if (is_sea) {
@@ -478,7 +484,8 @@ static void prv_draw_event_heading(GContext *ctx, GRect frame, const char *prefi
                                    bool high, GFont font) {
   GColor color = high ? COLOR_HIGH : COLOR_LOW;
   char label[24];
-  snprintf(label, sizeof(label), "%s %s", prefix, high ? "HIGH" : "LOW");
+  const char *state_word = s_beach_mode ? (high ? "SMALL" : "BIG") : (high ? "HIGH" : "LOW");
+  snprintf(label, sizeof(label), "%s %s", prefix, state_word);
   graphics_context_set_fill_color(ctx, color);
   prv_draw_arrow(ctx, high, frame.origin.x, frame.origin.y + 8);
   prv_draw_text(ctx, label, font,
@@ -632,7 +639,10 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   GColor trend_color = s_rising ? COLOR_HIGH : COLOR_LOW;
   graphics_context_set_fill_color(ctx, trend_color);
   prv_draw_arrow(ctx, s_rising, x + 58, header_y + 9);
-  prv_draw_text(ctx, s_rising ? "Rising" : "Falling", s_label_font,
+  const char *trend_word = s_beach_mode
+    ? (s_rising ? "Shrinking" : "Growing")
+    : (s_rising ? "Rising" : "Falling");
+  prv_draw_text(ctx, trend_word, s_label_font,
     GRect(x + 70, header_y, frame.size.w - 88, header_h), trend_color, GTextAlignmentLeft);
 
   int16_t rows_y = header_y + header_h;
@@ -837,6 +847,7 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
   Tuple *wave_values = dict_find(iterator, MESSAGE_KEY_tide_wave_values);
   Tuple *sync_complete = dict_find(iterator, MESSAGE_KEY_tide_sync_complete);
   Tuple *background_refresh = dict_find(iterator, MESSAGE_KEY_tide_background_refresh);
+  Tuple *beach_mode = dict_find(iterator, MESSAGE_KEY_tide_beach_mode);
 
   prv_copy_cstring_tuple(location, s_location, sizeof(s_location));
   prv_copy_cstring_tuple(status, s_status, sizeof(s_status));
@@ -872,6 +883,14 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
       s_background_refresh_enabled = enabled;
       persist_write_bool(PERSIST_KEY_BACKGROUND_REFRESH, s_background_refresh_enabled);
       prv_reschedule_wakeup();
+    }
+  }
+
+  if (beach_mode) {
+    bool enabled = beach_mode->value->int32 != 0;
+    if (enabled != s_beach_mode) {
+      s_beach_mode = enabled;
+      persist_write_bool(PERSIST_KEY_BEACH_MODE, s_beach_mode);
     }
   }
 
@@ -1018,6 +1037,8 @@ static void prv_init(void) {
 
   s_background_refresh_enabled = persist_exists(PERSIST_KEY_BACKGROUND_REFRESH)
     ? persist_read_bool(PERSIST_KEY_BACKGROUND_REFRESH) : true;
+  s_beach_mode = persist_exists(PERSIST_KEY_BEACH_MODE)
+    ? persist_read_bool(PERSIST_KEY_BEACH_MODE) : false;
   prv_persist_load();
 
   s_window = window_create();

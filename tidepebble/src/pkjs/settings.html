@@ -278,6 +278,22 @@
     </section>
 
     <section>
+      <p class="seclabel">Display</p>
+      <div class="card">
+        <div class="row">
+          <div class="rl">
+            <div class="rt">Beach or Tide?</div>
+            <div class="rd">Show tide height (High/Low, Rising/Falling) or beach size (Big/Small, Growing/Shrinking).</div>
+          </div>
+          <div class="miniseg" role="tablist" aria-label="Beach or Tide">
+            <button role="tab" id="beachOff" aria-selected="true" onclick="setBeachMode(false)">Tide</button>
+            <button role="tab" id="beachOn" aria-selected="false" onclick="setBeachMode(true)">Beach</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
       <p class="seclabel">Data sources</p>
       <div class="card">
         <div class="pad">
@@ -316,7 +332,7 @@
   if (typeof injected === 'undefined') {
     var injected = null;
   }
-  var state = Object.assign({ mode: 'gps', location: 'Phone GPS', lat: null, lon: null, backgroundRefresh: true },
+  var state = Object.assign({ mode: 'gps', location: 'Phone GPS', lat: null, lon: null, backgroundRefresh: true, beachMode: false },
     injected || {});
 
   // URL params take precedence (open_config.js dev flow passes these)
@@ -329,6 +345,8 @@
     if (!isNaN(lon)) state.lon = lon;
     var bg = getQuery('backgroundRefresh');
     if (bg !== null) state.backgroundRefresh = bg !== 'false';
+    var bm = getQuery('beachMode');
+    if (bm !== null) state.beachMode = bm === 'true';
   })();
 
   // ---- apply state to UI ----
@@ -342,11 +360,19 @@
     document.getElementById('manualWrap').hidden = state.mode !== 'manual';
     document.getElementById('bgOn').setAttribute('aria-selected', state.backgroundRefresh ? 'true' : 'false');
     document.getElementById('bgOff').setAttribute('aria-selected', state.backgroundRefresh ? 'false' : 'true');
+    document.getElementById('beachOn').setAttribute('aria-selected', state.beachMode ? 'true' : 'false');
+    document.getElementById('beachOff').setAttribute('aria-selected', state.beachMode ? 'false' : 'true');
   }
 
   // ---- background refresh toggle ----
   function setBackgroundRefresh(enabled) {
     state.backgroundRefresh = enabled;
+    applyState();
+  }
+
+  // ---- beach/tide toggle ----
+  function setBeachMode(enabled) {
+    state.beachMode = enabled;
     applyState();
   }
 
