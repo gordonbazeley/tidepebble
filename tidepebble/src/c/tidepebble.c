@@ -19,7 +19,7 @@
 #define CARD_GAP 8
 #define STALE_ICON_W 14
 #define STALE_ICON_GAP 4
-#define TIDE_BAR_SEGMENTS 5
+#define TIDE_BAR_SEGMENTS 6
 #define TIDE_BAR_GAP 4
 #define WAKEUP_INTERVAL_SECONDS (60 * 60)
 #define STALE_THRESHOLD_SECONDS (80 * 60)
@@ -33,7 +33,6 @@
 #define PERSIST_KEY_CURRENT_MINUTES_AT_SYNC 6
 #define PERSIST_KEY_LAST_SYNC_EPOCH 7
 #define PERSIST_KEY_BACKGROUND_REFRESH 8
-#define PERSIST_KEY_BEACH_MODE 9
 
 typedef enum {
   TidePageOverview = 0,
@@ -83,7 +82,6 @@ static bool s_waiting_for_double_tap;
 static AppTimer *s_close_timer;
 static bool s_is_stale;
 static bool s_background_refresh_enabled = true;
-static bool s_beach_mode = false;
 static time_t s_last_sync_epoch;
 static int16_t s_current_minutes_at_sync;
 
@@ -462,11 +460,18 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
 
   int16_t min_v, max_v;
   prv_tide_min_max(&min_v, &max_v);
+  int16_t mid_v = (int16_t)(((int32_t)min_v + max_v) / 2);
 
-  int32_t range = max_v - min_v;
-  int32_t filled = ((int32_t)(s_current_value - min_v) * TIDE_BAR_SEGMENTS + range / 2) / range;
-  if (filled < 0) filled = 0;
-  if (filled > TIDE_BAR_SEGMENTS) filled = TIDE_BAR_SEGMENTS;
+  int16_t sample = s_current_minutes / 60;
+  if (sample < 0) sample = 0;
+  if (sample > s_tide_count - 1) sample = s_tide_count - 1;
+
+  bool is_sea_seg[TIDE_BAR_SEGMENTS];
+  for (int16_t i = 0; i < TIDE_BAR_SEGMENTS; i++) {
+    int16_t idx = sample + i;
+    if (idx > s_tide_count - 1) idx = s_tide_count - 1;
+    is_sea_seg[i] = s_tide_values[idx] > mid_v;
+  }
 
   int16_t cell_h = padded.size.h / TIDE_BAR_SEGMENTS;
   int16_t y = padded.origin.y;
@@ -477,7 +482,7 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
     bool is_last = (i == TIDE_BAR_SEGMENTS - 1);
     int16_t h = is_last ? (padded.origin.y + padded.size.h - y) : cell_h;
     GRect cell = GRect(padded.origin.x, y, padded.size.w, h);
-    bool is_sea = i < filled;
+    bool is_sea = is_sea_seg[i];
 
     if (is_sea) {
       for (int16_t ry = cell.origin.y + TIDE_BAR_WAVE_AMP + 2;
@@ -496,12 +501,25 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
     y += h;
   }
 
-  if (filled > 0 && filled < TIDE_BAR_SEGMENTS) {
-    int16_t boundary_y = padded.origin.y + (int16_t)filled * cell_h;
+  {
+    int16_t boundary_i = TIDE_BAR_SEGMENTS;
+    for (int16_t i = 1; i < TIDE_BAR_SEGMENTS; i++) {
+      if (is_sea_seg[i] != is_sea_seg[0]) {
+        boundary_i = i;
+        break;
+      }
+    }
+    int16_t boundary_y = (boundary_i >= TIDE_BAR_SEGMENTS)
+      ? (is_sea_seg[0] ? padded.origin.y + padded.size.h : padded.origin.y)
+      : padded.origin.y + boundary_i * cell_h;
     GPath *arrow = s_rising ? s_arrow_big_up_path : s_arrow_big_down_path;
     GColor arrow_color = s_rising ? COLOR_HIGH : COLOR_LOW;
     int16_t arrow_x = padded.origin.x + padded.size.w / 2 - ARROW_BIG_W / 2;
     int16_t arrow_y = boundary_y - ARROW_BIG_H / 2;
+    int16_t min_arrow_y = padded.origin.y;
+    int16_t max_arrow_y = padded.origin.y + padded.size.h - ARROW_BIG_H;
+    if (arrow_y < min_arrow_y) arrow_y = min_arrow_y;
+    if (arrow_y > max_arrow_y) arrow_y = max_arrow_y;
     int16_t center_x = arrow_x + ARROW_BIG_W / 2;
 
     graphics_context_set_fill_color(ctx, arrow_color);
@@ -534,8 +552,7 @@ static void prv_draw_event_heading(GContext *ctx, GRect frame, const char *prefi
                                    bool high, GFont font) {
   GColor color = high ? COLOR_HIGH : COLOR_LOW;
   char label[24];
-  const char *state_word = s_beach_mode ? (high ? "SMALL" : "BIG") : (high ? "HIGH" : "LOW");
-  snprintf(label, sizeof(label), "%s %s", prefix, state_word);
+  snprintf(label, sizeof(label), "%s %s", prefix, high ? "HIGH" : "LOW");
   graphics_context_set_fill_color(ctx, color);
   prv_draw_arrow(ctx, high, frame.origin.x, frame.origin.y + 8);
   prv_draw_text(ctx, label, font,
@@ -689,10 +706,7 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   GColor trend_color = s_rising ? COLOR_HIGH : COLOR_LOW;
   graphics_context_set_fill_color(ctx, trend_color);
   prv_draw_arrow(ctx, s_rising, x + 58, header_y + 9);
-  const char *trend_word = s_beach_mode
-    ? (s_rising ? "Shrinking" : "Growing")
-    : (s_rising ? "Rising" : "Falling");
-  prv_draw_text(ctx, trend_word, s_label_font,
+  prv_draw_text(ctx, s_rising ? "Rising" : "Falling", s_label_font,
     GRect(x + 70, header_y, frame.size.w - 88, header_h), trend_color, GTextAlignmentLeft);
 
   int16_t rows_y = header_y + header_h;
@@ -897,7 +911,6 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
   Tuple *wave_values = dict_find(iterator, MESSAGE_KEY_tide_wave_values);
   Tuple *sync_complete = dict_find(iterator, MESSAGE_KEY_tide_sync_complete);
   Tuple *background_refresh = dict_find(iterator, MESSAGE_KEY_tide_background_refresh);
-  Tuple *beach_mode = dict_find(iterator, MESSAGE_KEY_tide_beach_mode);
 
   prv_copy_cstring_tuple(location, s_location, sizeof(s_location));
   prv_copy_cstring_tuple(status, s_status, sizeof(s_status));
@@ -933,14 +946,6 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
       s_background_refresh_enabled = enabled;
       persist_write_bool(PERSIST_KEY_BACKGROUND_REFRESH, s_background_refresh_enabled);
       prv_reschedule_wakeup();
-    }
-  }
-
-  if (beach_mode) {
-    bool enabled = beach_mode->value->int32 != 0;
-    if (enabled != s_beach_mode) {
-      s_beach_mode = enabled;
-      persist_write_bool(PERSIST_KEY_BEACH_MODE, s_beach_mode);
     }
   }
 
@@ -1089,8 +1094,6 @@ static void prv_init(void) {
 
   s_background_refresh_enabled = persist_exists(PERSIST_KEY_BACKGROUND_REFRESH)
     ? persist_read_bool(PERSIST_KEY_BACKGROUND_REFRESH) : true;
-  s_beach_mode = persist_exists(PERSIST_KEY_BEACH_MODE)
-    ? persist_read_bool(PERSIST_KEY_BEACH_MODE) : false;
   prv_persist_load();
 
   s_window = window_create();

@@ -152,10 +152,9 @@
   .empty { font-size: 13.5px; color: var(--faint); margin: 12px 2px 0; }
 
   /* display settings rows */
-  .row { display: flex; align-items: center; gap: 14px; padding: clamp(14px,4vw,17px) clamp(15px,4.2vw,19px); }
+  .row { display: flex; align-items: center; gap: 14px; padding: clamp(15px, 4.2vw, 19px); }
   .row .rl { flex: 1 1 auto; min-width: 0; }
-  .row .rt { font-size: 15.5px; font-weight: 600; }
-  .row .rd { font-size: 12.5px; color: var(--gray); margin-top: 2px; }
+  .row .rd { font-size: 13.5px; color: var(--gray); }
   .miniseg { flex: 0 0 auto; display: inline-grid; grid-auto-flow: column; gap: 3px; background: #eef2f5; border-radius: 10px; padding: 3px; }
   .miniseg button {
     appearance: none; border: 0; background: transparent; font: inherit; cursor: pointer;
@@ -164,11 +163,11 @@
   .miniseg button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(16,40,60,.16); }
 
   /* sources */
-  .sources { font-size: 13px; color: var(--gray); line-height: 1.6; padding: 0 4px; }
+  .sources { font-size: 13.5px; color: var(--gray); }
   .sources a { color: var(--link); text-decoration: none; font-weight: 600; }
   .sources a:active { text-decoration: underline; }
   .sources .srow { display: flex; gap: 8px; }
-  .sources .srow + .srow { margin-top: 6px; }
+  .sources .srow + .srow { margin-top: 12px; }
   .sources .sk { color: var(--faint); flex: 0 0 auto; }
 
   /* sticky save bar */
@@ -266,40 +265,12 @@
       <div class="card">
         <div class="row">
           <div class="rl">
-            <div class="rt">Background hourly refresh</div>
-            <div class="rd">Wakes the watch once an hour (when not in Quiet Time) to keep tide data current. Turn off to only refresh when you open the app. If it hasn't been possible to download data a clock icon will be shown next to time to indicate the data is stale.</div>
+            <div class="rd" style="margin-bottom:12px;">Wakes the watch once an hour (when not in Quiet Time) to keep tide data current. Turn off to only refresh when you open the app.</div>
+            <div class="rd">If it hasn't been possible to download data a clock icon will be shown next to time to indicate the data is stale.</div>
           </div>
           <div class="miniseg" role="tablist" aria-label="Background refresh">
             <button role="tab" id="bgOn" aria-selected="true" onclick="setBackgroundRefresh(true)">On</button>
             <button role="tab" id="bgOff" aria-selected="false" onclick="setBackgroundRefresh(false)">Off</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section>
-      <p class="seclabel">Display</p>
-      <div class="card">
-        <div class="row">
-          <div class="rl">
-            <div class="rt">Beach or Tide?</div>
-            <div class="rd">Show tide height (High/Low, Rising/Falling) or beach size (Big/Small, Growing/Shrinking).</div>
-          </div>
-          <div class="miniseg" role="tablist" aria-label="Beach or Tide">
-            <button role="tab" id="beachOff" aria-selected="true" onclick="setBeachMode(false)">Tide</button>
-            <button role="tab" id="beachOn" aria-selected="false" onclick="setBeachMode(true)">Beach</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section>
-      <p class="seclabel">Data sources</p>
-      <div class="card">
-        <div class="pad">
-          <div class="sources">
-            <div class="srow"><span class="sk">Tides</span><span><a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> marine data, sourced from DWD.</span></div>
-            <div class="srow"><span class="sk">Places</span><span><a href="https://www.bigdatacloud.com" target="_blank" rel="noopener">BigDataCloud</a> reverse geocoding.</span></div>
           </div>
         </div>
       </div>
@@ -314,6 +285,18 @@
           <a href="https://ko-fi.com/gordonbazeley">
             <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Buy me a coffee on Ko-fi" />
           </a>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <p class="seclabel">Data sources</p>
+      <div class="card">
+        <div class="pad">
+          <div class="sources">
+            <div class="srow"><span class="sk">Tides</span><span><a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> marine data, sourced from DWD.</span></div>
+            <div class="srow"><span class="sk">Places</span><span><a href="https://www.bigdatacloud.com" target="_blank" rel="noopener">BigDataCloud</a> reverse geocoding.</span></div>
+          </div>
         </div>
       </div>
     </section>
@@ -345,7 +328,7 @@
   if (typeof injected === 'undefined') {
     var injected = null;
   }
-  var state = Object.assign({ mode: 'gps', location: 'Phone GPS', lat: null, lon: null, backgroundRefresh: true, beachMode: false },
+  var state = Object.assign({ mode: 'gps', location: 'Phone GPS', lat: null, lon: null, backgroundRefresh: true },
     injected || {});
 
   // URL params take precedence (open_config.js dev flow passes these)
@@ -358,8 +341,6 @@
     if (!isNaN(lon)) state.lon = lon;
     var bg = getQuery('backgroundRefresh');
     if (bg !== null) state.backgroundRefresh = bg !== 'false';
-    var bm = getQuery('beachMode');
-    if (bm !== null) state.beachMode = bm === 'true';
   })();
 
   // ---- apply state to UI ----
@@ -373,19 +354,11 @@
     document.getElementById('manualWrap').hidden = state.mode !== 'manual';
     document.getElementById('bgOn').setAttribute('aria-selected', state.backgroundRefresh ? 'true' : 'false');
     document.getElementById('bgOff').setAttribute('aria-selected', state.backgroundRefresh ? 'false' : 'true');
-    document.getElementById('beachOn').setAttribute('aria-selected', state.beachMode ? 'true' : 'false');
-    document.getElementById('beachOff').setAttribute('aria-selected', state.beachMode ? 'false' : 'true');
   }
 
   // ---- background refresh toggle ----
   function setBackgroundRefresh(enabled) {
     state.backgroundRefresh = enabled;
-    applyState();
-  }
-
-  // ---- beach/tide toggle ----
-  function setBeachMode(enabled) {
-    state.beachMode = enabled;
     applyState();
   }
 

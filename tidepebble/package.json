@@ -31,8 +31,7 @@
       "tide_wave_values",
       "tide_sync_complete",
       "tide_background_refresh",
-      "tide_refresh_request",
-      "tide_beach_mode"
+      "tide_refresh_request"
     ],
     "capabilities": [
       "configurable",
