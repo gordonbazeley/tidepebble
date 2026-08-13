@@ -1029,6 +1029,19 @@ static void prv_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_SELECT, prv_select_click_handler);
 }
 
+static void prv_touch_handler(const TouchEvent *event, void *context) {
+  if (event->type != TouchEvent_Touchdown) return;
+  GRect bounds = layer_get_bounds(window_get_root_layer(s_window));
+  int16_t third = bounds.size.h / 3;
+  if (event->y < third) {
+    prv_up_click_handler(NULL, NULL);
+  } else if (event->y > third * 2) {
+    prv_down_click_handler(NULL, NULL);
+  } else {
+    prv_select_click_handler(NULL, NULL);
+  }
+}
+
 static void prv_window_load(Window *window) {
   Layer *root = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(root);
@@ -1123,9 +1136,11 @@ static void prv_init(void) {
 
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick_handler);
   accel_tap_service_subscribe(prv_tap_handler);
+  touch_service_subscribe(prv_touch_handler, NULL);
 }
 
 static void prv_deinit(void) {
+  touch_service_unsubscribe();
   accel_tap_service_unsubscribe();
   tick_timer_service_unsubscribe();
   if (s_double_tap_timer) {

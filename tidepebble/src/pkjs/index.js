@@ -5,12 +5,6 @@
   var HOURS_TO_SEND = 24;
   var TIDE_CHUNK_SIZE = 12;
   var TIDE_VALUE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-  var NEWQUAY_FALLBACK = {
-    coords: {
-      latitude: 50.4155,
-      longitude: -5.0737
-    }
-  };
   var SELECTED_LOCATION_KEY = 'tide_selected_location_v1';
   var BACKGROUND_REFRESH_KEY = 'tide_background_refresh_v1';
   var s_selectedLocation = null;
@@ -234,9 +228,8 @@
       fetchTides({ coords: s_selectedLocation }, geocodingLabel(s_selectedLocation));
       return;
     }
-    sendStatus('Using Newquay fallback...');
-    fetchTides(NEWQUAY_FALLBACK, 'Newquay, Cornwall');
     if (!navigator.geolocation) {
+      sendStatus('No location set - open settings');
       return;
     }
     sendStatus('Finding phone location...');
@@ -245,6 +238,7 @@
         fetchTides(position, label);
       });
     }, function() {
+      sendStatus('Location unavailable - open settings');
     }, {
       enableHighAccuracy: false,
       timeout: 15000,
