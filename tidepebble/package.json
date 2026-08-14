@@ -13,7 +13,8 @@
     "sdkVersion": "3",
     "enableMultiJS": true,
     "targetPlatforms": [
-      "emery"
+      "emery",
+      "gabbro"
     ],
     "watchapp": {
       "watchface": false,
@@ -31,7 +32,8 @@
       "tide_wave_values",
       "tide_sync_complete",
       "tide_background_refresh",
-      "tide_refresh_request"
+      "tide_refresh_request",
+      "tide_units_override"
     ],
     "capabilities": [
       "configurable",

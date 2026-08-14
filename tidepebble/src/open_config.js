@@ -1,7 +1,18 @@
 #!/usr/bin/env node
-// Opens TidePebble settings in Brave via a local HTTP server.
-// Serves src/pkjs/settings.html directly; passes current settings as query params;
-// receives saved settings at /save and persists them to pypkjs localStorage.
+// Dev-only config UI for the emulator. `pebble emu-app-config` can't be used here:
+// its default flow navigates to a data: URL (blocked by modern Chromium's top-frame
+// data: URL restriction), and its --file fallback loads the page but Save then tries
+// to launch the custom `pebblejs://close` scheme, which has no registered handler
+// outside pebble-tool's own (broken, for the same reason) interception. So instead of
+// going through Pebble.openURL/webviewclosed at all, this serves settings.html over a
+// real http://127.0.0.1 URL (Save just navigates there, no special scheme involved),
+// and on save, fetches Open-Meteo directly and pushes the result to the running
+// emulator via send_tide_message.py (see that file for why: `pebble send-app-message`
+// itself doesn't wait for the watch's ACK before disconnecting, so it silently drops
+// messages under load). That means location set here is live-only for the running
+// emulator: it is not written to pypkjs's own localStorage (an opaque per-platform
+// shelve DB, not worth reverse-engineering for a dev tool), so it won't survive an
+// app reinstall.
 
 var http = require('http');
 var fs = require('fs');
@@ -9,48 +20,164 @@ var path = require('path');
 var crypto = require('crypto');
 var child_process = require('child_process');
 
-var pkg = require(path.resolve(__dirname, '..', 'package.json'));
-var MSG_KEY_INDEX = {};
-(pkg.pebble.messageKeys || []).forEach(function(name, idx) { MSG_KEY_INDEX[name] = idx; });
-
-var SELECTED_LOCATION_KEY = 'tide_selected_location_v1';
-var APP_UUID = pkg.pebble.uuid;
 var PROJECT_ROOT = path.resolve(__dirname, '..');
 var SETTINGS_HTML = path.resolve(__dirname, 'pkjs', 'settings.html');
+var MESSAGE_KEYS_C = path.resolve(PROJECT_ROOT, 'build', 'src', 'message_keys.auto.c');
+var SEND_SCRIPT = path.resolve(__dirname, 'send_tide_message.py');
 
-function findLocalStorageFile() {
-  var candidates = [
-    path.join(process.env.HOME, '.pebble-dev', APP_UUID, 'localStorage.json'),
-    path.join(process.env.HOME, '.pebble-dev', 'pypkjs_localStorage.json'),
-    path.join(process.env.HOME, 'Library', 'Application Support', 'Pebble SDK', '4.9.169', 'emery', 'localStorage.json'),
-  ];
-  for (var i = 0; i < candidates.length; i++) {
-    if (fs.existsSync(candidates[i])) return candidates[i];
+var MARINE_API = 'https://marine-api.open-meteo.com/v1/marine';
+var HOURS_TO_SEND = 24;
+var TIDE_CHUNK_SIZE = 12;
+var TIDE_VALUE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+var APP_UUID = require(path.resolve(PROJECT_ROOT, 'package.json')).pebble.uuid;
+
+function loadMessageKeys() {
+  if (!fs.existsSync(MESSAGE_KEYS_C)) {
+    throw new Error('build/src/message_keys.auto.c not found — run `pebble build` first');
   }
-  try {
-    var result = child_process.execSync(
-      'find "$HOME/.pebble-dev" "$HOME/Library/Application Support/Pebble SDK" -name "*.json" -exec grep -l "' + SELECTED_LOCATION_KEY + '" {} \\; 2>/dev/null | head -1',
-      { timeout: 5000, env: process.env }
-    ).toString().trim();
-    if (result) return result;
-  } catch (e) {}
-  return null;
+  var text = fs.readFileSync(MESSAGE_KEYS_C, 'utf8');
+  var keys = {};
+  var re = /MESSAGE_KEY_(\w+)\s*=\s*(\d+);/g;
+  var m;
+  while ((m = re.exec(text))) {
+    keys[m[1]] = m[2];
+  }
+  return keys;
 }
 
-var storageData = {};
-var lsFile = findLocalStorageFile();
-if (lsFile) {
-  try {
-    storageData = JSON.parse(fs.readFileSync(lsFile, 'utf8'));
-    console.log('Loaded settings from', lsFile);
-  } catch (e) {
-    console.warn('Could not parse localStorage file:', e.message);
-  }
-} else {
-  console.warn('pypkjs localStorage not found; using default settings');
+var KEYS = loadMessageKeys();
+
+// send_tide_message.py needs libpebble2/pebble_tool, which live in pebble-tool's
+// own venv, not the system Python — use the interpreter sitting next to the
+// `pebble` binary itself rather than hardcoding a path.
+function findPebbleVenvPython() {
+  var pebbleBin = child_process.execFileSync('which', ['pebble']).toString().trim();
+  var realBin = fs.realpathSync(pebbleBin); // `which` finds a shim symlink; resolve it to the real venv bin/
+  var candidate = path.join(path.dirname(realBin), 'python3');
+  return fs.existsSync(candidate) ? candidate : 'python3';
 }
 
-// Read HTML from disk
+var PYTHON_BIN = findPebbleVenvPython();
+
+function encodeTideValue(value) {
+  var encoded = value + 2048;
+  if (encoded < 0) encoded = 0;
+  if (encoded > 4095) encoded = 4095;
+  return TIDE_VALUE_ALPHABET.charAt((encoded >> 6) & 63) +
+    TIDE_VALUE_ALPHABET.charAt(encoded & 63);
+}
+
+function findFirstCurrentHour(times) {
+  var now = Date.now();
+  for (var i = 0; i < times.length; i += 1) {
+    if (new Date(times[i]).getTime() >= now) return i;
+  }
+  return 0;
+}
+
+// Throws if the watch doesn't ACK within send_tide_message.py's timeout, so a
+// dropped message surfaces as a real error instead of a false "OK".
+function sendAppMessage(fields) {
+  var args = [SEND_SCRIPT, APP_UUID];
+  Object.keys(fields).forEach(function(name) {
+    var value = fields[name];
+    var key = KEYS[name];
+    if (!key) throw new Error('Unknown message key: ' + name);
+    var kind = typeof value === 'number' ? 'i' : 's';
+    args.push(kind + ':' + key + '=' + value);
+  });
+  child_process.execFileSync(PYTHON_BIN, args, { cwd: PROJECT_ROOT });
+}
+
+async function pushLocationToEmulator(latitude, longitude, label) {
+  var url = MARINE_API +
+    '?latitude=' + encodeURIComponent(latitude) +
+    '&longitude=' + encodeURIComponent(longitude) +
+    '&hourly=sea_level_height_msl,swell_wave_height,sea_surface_temperature' +
+    '&forecast_days=2&timezone=auto';
+
+  var response = await fetch(url);
+  if (!response.ok) {
+    return { ok: false, message: 'Tide service unavailable (HTTP ' + response.status + ')' };
+  }
+  var data = await response.json();
+  var times = data.hourly.time;
+  var heights = data.hourly.sea_level_height_msl;
+  var swellHeights = data.hourly.swell_wave_height;
+  var seaTemps = data.hourly.sea_surface_temperature;
+  var start = Math.max(0, findFirstCurrentHour(times) - 1);
+  var currentMinutes = Math.round((Date.now() - new Date(times[start]).getTime()) / 60000);
+  var waveH = swellHeights && swellHeights[start] != null ? swellHeights[start] : 0;
+  var seaT = seaTemps && seaTemps[start] != null ? seaTemps[start] : 0;
+
+  var values = [];
+  var waveValues = [];
+  for (var i = start; i < times.length && values.length < HOURS_TO_SEND; i += 1) {
+    if (heights[i] === null || typeof heights[i] === 'undefined') continue;
+    values.push(encodeTideValue(Math.round(heights[i] * 100)));
+    var wv = swellHeights && swellHeights[i] != null ? swellHeights[i] : 0;
+    waveValues.push(encodeTideValue(Math.round(wv * 100)));
+  }
+  if (values.length < 2) {
+    return { ok: false, message: 'No tide forecast near ' + label + ' — Open-Meteo has no marine data there' };
+  }
+
+  var chunks = [];
+  for (var chunkStart = 0; chunkStart < values.length; chunkStart += TIDE_CHUNK_SIZE) {
+    chunks.push({
+      offset: chunkStart,
+      values: values.slice(chunkStart, chunkStart + TIDE_CHUNK_SIZE).join(''),
+      waveValues: waveValues.slice(chunkStart, chunkStart + TIDE_CHUNK_SIZE).join(''),
+    });
+  }
+
+  // Each sendAppMessage() call blocks until the watch ACKs (or throws on
+  // timeout/NACK), so these can fire back-to-back with no artificial delay.
+  async function sendAll() {
+    sendAppMessage({
+      tide_location: label,
+      tide_status: '',
+      tide_current_minutes: currentMinutes,
+      tide_wave_height: Math.round(waveH * 100),
+      tide_sea_temp: Math.round(seaT * 10),
+      tide_sample_offset: chunks[0].offset,
+      tide_values: chunks[0].values,
+      tide_wave_values: chunks[0].waveValues,
+      // Real units come from the phone's own settings (health_service, see
+      // c/tidepebble.c prv_use_metric_units) — no user-facing override on
+      // real devices. The emulator's simulated phone has no real region
+      // setting and defaults to imperial, so force metric here specifically
+      // for emulator testing.
+      tide_units_override: 1,
+    });
+
+    for (var c = 1; c < chunks.length; c += 1) {
+      sendAppMessage({
+        tide_sample_offset: chunks[c].offset,
+        tide_values: chunks[c].values,
+        tide_wave_values: chunks[c].waveValues,
+      });
+    }
+
+    sendAppMessage({ tide_sync_complete: 1 });
+  }
+
+  await sendAll();
+
+  // The watch requests a refresh from the phone's real GPS on every launch
+  // (c/tidepebble.c prv_init -> prv_send_refresh_request), and phone-side
+  // geolocation has a 15s timeout before falling back — so a launch that's
+  // still starting up can silently overwrite this push a few seconds from
+  // now. Resend once more after that window closes so this push wins last.
+  setTimeout(function() {
+    sendAll().catch(function(err) { console.error('Guard resend failed:', err.message); });
+  }, 18000);
+
+  return { ok: true, message: 'Pushed ' + values.length + 'h of tide data for ' + label + ' to the running emulator.' };
+}
+
+// ---- HTTP server ----
 if (!fs.existsSync(SETTINGS_HTML)) {
   console.error('Error: settings HTML not found at', SETTINGS_HTML);
   process.exit(1);
@@ -58,50 +185,25 @@ if (!fs.existsSync(SETTINGS_HTML)) {
 var html = fs.readFileSync(SETTINGS_HTML, 'utf8');
 var saveToken = crypto.randomBytes(16).toString('hex');
 
-function finiteNumber(value) {
-  return typeof value === 'number' && isFinite(value);
+// This tool only ever targets --emulator emery, so "preset for the emulator"
+// just means: default the settings page to a known-good coastal spot instead
+// of Phone GPS, which the emulator can't resolve to anywhere useful anyway.
+var lastState = {
+  mode: 'manual', location: 'Newgale, Wales', lat: 51.85785, lon: -5.12673,
+};
+
+function statusPage(title, message) {
+  return [
+    '<!doctype html><html><head><meta charset="utf-8">',
+    '<style>body{font-family:Helvetica,Arial,sans-serif;margin:40px;background:#f5f5f5;text-align:center;}',
+    'h1{color:#111;font-size:24px;}p{color:#555;font-size:16px;max-width:480px;margin:0 auto;}</style></head><body>',
+    '<h1>' + title + '</h1>',
+    '<p>' + message + '</p>',
+    '<p>You may close this tab.</p>',
+    '</body></html>',
+  ].join('');
 }
 
-// Determine current state from localStorage
-function getCurrentState() {
-  var state = { mode: 'gps', location: 'Phone GPS', lat: null, lon: null };
-  try {
-    var raw = storageData[SELECTED_LOCATION_KEY];
-    if (raw) {
-      var loc = JSON.parse(raw);
-      state.mode = 'manual';
-      state.location = loc.name + (loc.admin1 ? ', ' + loc.admin1 : '');
-      state.lat = finiteNumber(loc.latitude) ? loc.latitude : null;
-      state.lon = finiteNumber(loc.longitude) ? loc.longitude : null;
-    }
-  } catch (e) {}
-  return state;
-}
-
-function persistSettings() {
-  if (!lsFile) {
-    lsFile = path.join(process.env.HOME, '.pebble-dev', APP_UUID, 'localStorage.json');
-  }
-  try {
-    fs.mkdirSync(path.dirname(lsFile), { recursive: true });
-    fs.writeFileSync(lsFile, JSON.stringify(storageData, null, 2));
-    console.log('Settings persisted to', lsFile);
-  } catch (e) {
-    console.warn('Could not write localStorage file:', e.message);
-  }
-}
-
-function refreshWatch() {
-  // Reinstall so pkjs restarts and loads the new location from localStorage.
-  try {
-    child_process.execFileSync('pebble', ['install', '--emulator', 'emery'], { cwd: PROJECT_ROOT, timeout: 30000 });
-    console.log('App reinstalled; pkjs reloading with new settings.');
-  } catch (e) {
-    console.warn('Reinstall failed — new settings will apply on next launch:', e.message.slice(0, 120));
-  }
-}
-
-// ---- HTTP server ----
 var serverTimer = null;
 var server = http.createServer(function(req, res) {
   var parsed = new URL(req.url, 'http://127.0.0.1');
@@ -124,48 +226,35 @@ var server = http.createServer(function(req, res) {
         return;
       }
     }
-
     console.log('Received settings:', JSON.stringify(settings));
 
-    // Persist selected location
-    if (settings.mode === 'gps' || settings.usePhoneLocation) {
-      delete storageData[SELECTED_LOCATION_KEY];
-      console.log('GPS mode: cleared manual location');
-    } else if (settings.mode === 'manual' && finiteNumber(settings.lat) &&
-        finiteNumber(settings.lon)) {
-      // New state format
-      var locParts = (settings.location || '').split(', ');
-      storageData[SELECTED_LOCATION_KEY] = JSON.stringify({
-        latitude: settings.lat,
-        longitude: settings.lon,
-        name: locParts[0] || settings.location || 'Unknown',
-        admin1: locParts[1] || '',
-        country: locParts[2] || '',
-      });
-    } else if (finiteNumber(settings.latitude) && finiteNumber(settings.longitude)) {
-      // Legacy format
-      storageData[SELECTED_LOCATION_KEY] = JSON.stringify(settings);
-    }
+    var handled = (async function() {
+      if (settings.mode === 'manual' && typeof settings.lat === 'number' && typeof settings.lon === 'number') {
+        lastState = { mode: 'manual', location: settings.location, lat: settings.lat, lon: settings.lon };
+        return pushLocationToEmulator(settings.lat, settings.lon, settings.location || 'selected location');
+      }
+      lastState = { mode: 'gps', location: 'Phone GPS', lat: null, lon: null };
+      return {
+        ok: false,
+        message: 'GPS mode isn\'t automated by this dev tool (no real phone location available). ' +
+          'Pick a coastal location manually to preview it on the emulator.',
+      };
+    })();
 
-    persistSettings();
-    refreshWatch();
-
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end([
-      '<!doctype html><html><head><meta charset="utf-8">',
-      '<style>body{font-family:Helvetica,Arial,sans-serif;margin:40px;background:#f5f5f5;text-align:center;}',
-      'h1{color:#111;font-size:24px;}p{color:#555;font-size:16px;}</style></head><body>',
-      '<h1>Settings saved</h1>',
-      '<p>You may close this tab.</p>',
-      '</body></html>',
-    ].join(''));
-
-    if (serverTimer) clearTimeout(serverTimer);
-    setTimeout(function() { server.close(); }, 2000);
+    handled.then(function(result) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(statusPage(result.ok ? 'Sent to emulator' : 'Not sent', result.message));
+      console.log(result.ok ? 'OK:' : 'Skipped:', result.message);
+      if (serverTimer) clearTimeout(serverTimer);
+      setTimeout(function() { server.close(); }, 2000);
+    }).catch(function(err) {
+      res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(statusPage('Error', String(err && err.message || err)));
+      console.error(err);
+    });
     return;
   }
 
-  // Serve settings HTML with current state as query params
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
 });
@@ -186,22 +275,19 @@ server.listen(0, '127.0.0.1', function() {
   var base = 'http://127.0.0.1:' + port;
   var returnTo = encodeURIComponent(base + '/save?token=' + saveToken + '&data=');
 
-  // Build query string from current state
-  var state = getCurrentState();
   var params = [
     'return_to=' + returnTo,
-    'mode=' + encodeURIComponent(state.mode),
-    'location=' + encodeURIComponent(state.location),
+    'mode=' + encodeURIComponent(lastState.mode),
+    'location=' + encodeURIComponent(lastState.location),
   ];
-  if (state.lat != null) params.push('lat=' + state.lat);
-  if (state.lon != null) params.push('lon=' + state.lon);
+  if (lastState.lat != null) params.push('lat=' + lastState.lat);
+  if (lastState.lon != null) params.push('lon=' + lastState.lon);
 
   var configUrl = base + '/?' + params.join('&');
 
   try {
     child_process.execFileSync('open', ['-a', 'Brave Browser', configUrl]);
     console.log('Config server: http://127.0.0.1:' + port);
-    console.log('Current state:', JSON.stringify(state));
   } catch (e) {
     console.error('Could not open Brave:', e.message);
     server.close();

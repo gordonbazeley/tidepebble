@@ -40,7 +40,8 @@
 | `src/pkjs/index.js` | Phone companion: GPS, fetch, encode, send (~290 lines) |
 | `src/pkjs/settings.html` | Settings UI (data-URI page, ~415 lines) |
 | `src/pkjs/settings-html.js` | CommonJS string loaded by pkjs; generated copy of settings.html |
-| `src/open_config.js` | Dev helper: opens settings in browser with URL params |
+| `src/open_config.js` | Dev helper: serves settings.html over localhost, pushes chosen location's tides to the emulator via `send_tide_message.py` (live-only, not persisted) |
+| `src/send_tide_message.py` | Dev helper: sends a single AppMessage to the emulator and waits for ACK/NACK before exiting — `pebble send-app-message` doesn't wait for ACK and silently drops messages under load |
 | `package.json` | Pebble metadata, message keys |
 | `wscript` | SDK build rules |
 | `store_assets/` | App store images (banner, icons, screenshots) |

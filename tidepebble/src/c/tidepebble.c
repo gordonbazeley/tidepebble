@@ -14,7 +14,17 @@
 #define ARROW_BIG_TAIL_LEN 8
 #define ARROW_BIG_TAIL_WIDTH 5
 #define DOUBLE_TAP_MS 500
-#define PAGE_MARGIN 8
+#define PAGE_MARGIN PBL_IF_ROUND_ELSE(20, 8)
+// Content whose bottom edge sits at PAGE_MARGIN from the true bottom of a
+// round screen still clips — the chord is far narrower there than the mid-
+// screen width PAGE_MARGIN was sized for. Extra clearance for anything
+// anchored to the bottom edge specifically (cards, the tide bar).
+#define ROUND_BOTTOM_EXTRA PBL_IF_ROUND_ELSE(30, 0)
+// Then/Later's cards are already inset by their own internal text padding,
+// so they don't need as much extra clearance as the tide bar's full-width
+// dot pattern does — and with two cards stacked, every pixel is scarce.
+#define ROUND_CARD_BOTTOM_EXTRA PBL_IF_ROUND_ELSE(14, 0)
+#define HEADER_SIDE_INSET PBL_IF_ROUND_ELSE(42, 4)
 #define PAGE_DOTS_W 20
 #define CARD_GAP 8
 #define STALE_ICON_W 14
@@ -33,6 +43,11 @@
 #define PERSIST_KEY_CURRENT_MINUTES_AT_SYNC 6
 #define PERSIST_KEY_LAST_SYNC_EPOCH 7
 #define PERSIST_KEY_BACKGROUND_REFRESH 8
+#define PERSIST_KEY_UNITS_OVERRIDE 9
+
+#define UNITS_OVERRIDE_AUTO 0
+#define UNITS_OVERRIDE_METRIC 1
+#define UNITS_OVERRIDE_IMPERIAL 2
 
 typedef enum {
   TidePageOverview = 0,
@@ -67,6 +82,8 @@ static bool s_event_highs[TIDE_EVENT_COUNT];
 static int16_t s_event_count;
 static bool s_rising = true;
 static int16_t s_current_value = 0;
+static int16_t s_local_min = 0;
+static int16_t s_local_max = 0;
 static int16_t s_wave_height = 0;
 static int16_t s_sea_temp = 0;
 static char s_time_display[6] = "--:--";
@@ -82,6 +99,7 @@ static bool s_waiting_for_double_tap;
 static AppTimer *s_close_timer;
 static bool s_is_stale;
 static bool s_background_refresh_enabled = true;
+static uint8_t s_units_override = UNITS_OVERRIDE_AUTO;
 static time_t s_last_sync_epoch;
 static int16_t s_current_minutes_at_sync;
 
@@ -148,6 +166,8 @@ static int16_t prv_parse_values(const char *csv, int16_t offset, int16_t *dest) 
   return count;
 }
 
+static void prv_tide_min_max(int16_t *min_out, int16_t *max_out);
+
 static bool prv_is_tide_event(int16_t index, bool high) {
   if (high) {
     return s_tide_values[index] > s_tide_values[index - 1] &&
@@ -158,6 +178,8 @@ static bool prv_is_tide_event(int16_t index, bool high) {
 }
 
 static bool prv_use_metric_units(void) {
+  if (s_units_override == UNITS_OVERRIDE_METRIC) return true;
+  if (s_units_override == UNITS_OVERRIDE_IMPERIAL) return false;
   return PBL_IF_HEALTH_ELSE(
     health_service_get_measurement_system_for_display(HealthMetricWalkedDistanceMeters) !=
       MeasurementSystemImperial,
@@ -270,6 +292,23 @@ static void prv_compute_state(void) {
       s_event_highs[s_event_count] = is_high;
       s_event_count += 1;
     }
+  }
+
+  int16_t prev_value = s_tide_values[0];
+  for (int16_t i = sample; i >= 1; i--) {
+    if (prv_is_tide_event(i, true) || prv_is_tide_event(i, false)) {
+      prev_value = s_tide_values[i];
+      break;
+    }
+  }
+  int16_t next_value = (s_event_count > 0)
+    ? s_tide_values[s_event_indices[0]]
+    : s_tide_values[s_tide_count - 1];
+
+  s_local_min = prev_value < next_value ? prev_value : next_value;
+  s_local_max = prev_value > next_value ? prev_value : next_value;
+  if (s_local_min == s_local_max) {
+    prv_tide_min_max(&s_local_min, &s_local_max);
   }
 }
 
@@ -458,19 +497,24 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
     return;
   }
 
-  int16_t min_v, max_v;
-  prv_tide_min_max(&min_v, &max_v);
-  int16_t mid_v = (int16_t)(((int32_t)min_v + max_v) / 2);
-
-  int16_t sample = s_current_minutes / 60;
-  if (sample < 0) sample = 0;
-  if (sample > s_tide_count - 1) sample = s_tide_count - 1;
+  // Snapshot of "now": sea fills from the top down by how full the local tidal
+  // range currently is, quantized to TIDE_BAR_SEGMENTS cells. Bracketed by the
+  // nearest past/future high-low events, not the whole fetched series, so a
+  // small local range on one day doesn't get swamped by a bigger range on another.
+  int16_t local_range = s_local_max - s_local_min;
+  int16_t sea_cells;
+  if (local_range > 0) {
+    sea_cells = (int16_t)(((int32_t)(s_current_value - s_local_min) * TIDE_BAR_SEGMENTS +
+      local_range / 2) / local_range);
+  } else {
+    sea_cells = (s_current_value >= s_local_max) ? TIDE_BAR_SEGMENTS : 0;
+  }
+  if (sea_cells < 0) sea_cells = 0;
+  if (sea_cells > TIDE_BAR_SEGMENTS) sea_cells = TIDE_BAR_SEGMENTS;
 
   bool is_sea_seg[TIDE_BAR_SEGMENTS];
   for (int16_t i = 0; i < TIDE_BAR_SEGMENTS; i++) {
-    int16_t idx = sample + i;
-    if (idx > s_tide_count - 1) idx = s_tide_count - 1;
-    is_sea_seg[i] = s_tide_values[idx] > mid_v;
+    is_sea_seg[i] = i < sea_cells;
   }
 
   int16_t cell_h = padded.size.h / TIDE_BAR_SEGMENTS;
@@ -646,15 +690,26 @@ static void prv_draw_event_card(GContext *ctx, GRect frame, int16_t event_number
   GFont time_font = layout == EventCardLayoutLarge ? s_large_time_font : s_compact_time_font;
   int16_t time_h = layout == EventCardLayoutLarge ? 72 : 34;
   int16_t time_y;
-  int16_t detail_h = 30;
+  int16_t detail_h = PBL_IF_ROUND_ELSE(22, 30);
   int16_t detail_y = frame.origin.y + frame.size.h - 34;
   if (layout == EventCardLayoutLarge) {
     time_y = frame.origin.y + 46;
   } else if (layout == EventCardLayoutNext) {
+#if defined(PBL_ROUND)
+    // Round's Then page has much less vertical budget per card than rect
+    // (bigger top/bottom bezel insets eat into it) — the rect formula below
+    // centers time between heading and a bottom-anchored detail row, which
+    // goes negative and overlaps once frame.size.h drops much below ~90px.
+    // Stack top-down with small fixed gaps instead, so a short card just
+    // sits tighter rather than overlapping.
+    time_y = y + 18;
+    detail_y = time_y + time_h - 14;
+#else
     int16_t heading_center = frame.origin.y + 14;
     int16_t detail_center = detail_y + detail_h / 2;
     int16_t time_center = heading_center + (detail_center - heading_center) / 2;
     time_y = time_center - time_h / 2;
+#endif
   } else {
     time_y = frame.origin.y + 20;
   }
@@ -728,11 +783,11 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
 
 static void prv_draw_now_page(GContext *ctx, GRect bounds) {
   int16_t top_margin = 3;
-  int16_t bottom_margin = PAGE_MARGIN;
+  int16_t bottom_margin = PAGE_MARGIN + ROUND_BOTTOM_EXTRA;
   GRect content = GRect(PAGE_MARGIN, top_margin, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
     bounds.size.h - top_margin - bottom_margin);
   GRect bar_content = GRect(content.origin.x, content.origin.y, content.size.w,
-    bounds.size.h - top_margin);
+    bounds.size.h - top_margin - ROUND_BOTTOM_EXTRA);
   GRect bg_frame = GRect(0, bar_content.origin.y, bar_content.origin.x + bar_content.size.w,
     bar_content.size.h);
   prv_draw_card_background(ctx, bg_frame, GColorBlack);
@@ -745,8 +800,11 @@ static void prv_draw_now_page(GContext *ctx, GRect bounds) {
 static void prv_draw_then_page(GContext *ctx, GRect bounds) {
   int16_t content_w = bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W;
   int16_t top_margin = 3;
-  int16_t bottom_margin = PAGE_MARGIN;
-  int16_t next_h = 84;
+  int16_t bottom_margin = PAGE_MARGIN + ROUND_CARD_BOTTOM_EXTRA;
+  // Round has much less total vertical budget for two stacked cards than
+  // rect (bigger top/bottom insets eat into it) — shrink the first card so
+  // the second one isn't left with almost nothing.
+  int16_t next_h = PBL_IF_ROUND_ELSE(66, 84);
   GRect next_card = GRect(PAGE_MARGIN, top_margin, content_w, next_h);
   GRect then_card = GRect(PAGE_MARGIN, top_margin + next_h + CARD_GAP, content_w,
     bounds.size.h - top_margin - bottom_margin - next_h - CARD_GAP);
@@ -756,19 +814,19 @@ static void prv_draw_then_page(GContext *ctx, GRect bounds) {
 
 static void prv_draw_later_page(GContext *ctx, GRect bounds) {
   GRect card = GRect(PAGE_MARGIN, PAGE_MARGIN, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
-    bounds.size.h - PAGE_MARGIN * 2);
+    bounds.size.h - PAGE_MARGIN * 2 - ROUND_BOTTOM_EXTRA);
   prv_draw_event_card(ctx, card, 2, "LATER", EventCardLayoutLarge);
 }
 
 static void prv_draw_overview_page(GContext *ctx, GRect bounds) {
   prv_draw_text(ctx, "OVERVIEW", s_label_font,
-    GRect(6, 0, bounds.size.w / 2, 28), COLOR_MUTED, GTextAlignmentLeft);
+    GRect(HEADER_SIDE_INSET, 0, bounds.size.w / 2, 28), COLOR_MUTED, GTextAlignmentLeft);
   prv_draw_text(ctx, "NEXT 24H", s_label_font,
-    GRect(bounds.size.w / 2 - 2, 0, bounds.size.w / 2 - 18, 28), COLOR_DIM,
+    GRect(bounds.size.w / 2 - 2, 0, bounds.size.w / 2 - HEADER_SIDE_INSET - 14, 28), COLOR_DIM,
     GTextAlignmentRight);
 
   GRect content = GRect(PAGE_MARGIN, 28, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
-    bounds.size.h - 30);
+    bounds.size.h - 30 - PBL_IF_ROUND_ELSE(28, 0));
   GRect bar_frame = prv_draw_tide_bar_for_content(ctx, content);
   GRect chart_frame = GRect(content.origin.x + bar_frame.size.w + TIDE_BAR_GAP, content.origin.y,
     content.size.w - bar_frame.size.w - TIDE_BAR_GAP, content.size.h);
@@ -911,6 +969,7 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
   Tuple *wave_values = dict_find(iterator, MESSAGE_KEY_tide_wave_values);
   Tuple *sync_complete = dict_find(iterator, MESSAGE_KEY_tide_sync_complete);
   Tuple *background_refresh = dict_find(iterator, MESSAGE_KEY_tide_background_refresh);
+  Tuple *units_override = dict_find(iterator, MESSAGE_KEY_tide_units_override);
 
   prv_copy_cstring_tuple(location, s_location, sizeof(s_location));
   prv_copy_cstring_tuple(status, s_status, sizeof(s_status));
@@ -946,6 +1005,14 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
       s_background_refresh_enabled = enabled;
       persist_write_bool(PERSIST_KEY_BACKGROUND_REFRESH, s_background_refresh_enabled);
       prv_reschedule_wakeup();
+    }
+  }
+
+  if (units_override) {
+    uint8_t override_value = (uint8_t)units_override->value->uint8;
+    if (override_value != s_units_override) {
+      s_units_override = override_value;
+      persist_write_int(PERSIST_KEY_UNITS_OVERRIDE, s_units_override);
     }
   }
 
@@ -998,6 +1065,11 @@ static TextLayer *prv_make_text_layer(GRect frame, GFont font, GTextAlignment al
   text_layer_set_text_color(layer, GColorWhite);
   text_layer_set_font(layer, font);
   text_layer_set_text_alignment(layer, alignment);
+  // Default overflow is word-wrap, which would hard-clip a second line
+  // against this single-line header's fixed height. Only used for the
+  // location/time header layers, which are exactly where round's narrower
+  // top-of-circle width means text needs to ellipsize gracefully, not wrap.
+  text_layer_set_overflow_mode(layer, GTextOverflowModeTrailingEllipsis);
   return layer;
 }
 
@@ -1070,16 +1142,24 @@ static void prv_window_load(Window *window) {
     FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_24,
     FONT_KEY_GOTHIC_24, FONT_KEY_GOTHIC_28, FONT_KEY_GOTHIC_28,
     FONT_KEY_GOTHIC_24));
-  const int16_t top_pad = PBL_IF_ROUND_ELSE(8, 0);
+  // Near the very top of a round display the circle's chord is much
+  // narrower than the screen width. Rather than pushing the header far down
+  // the circle to get a wide-enough chord for full edge-to-edge text
+  // (wastes a big chunk of the screen), pull the text in toward center via
+  // HEADER_SIDE_INSET (with ellipsis handling the overflow) and only push
+  // down as far as that narrower width actually needs.
+  const int16_t top_pad = PBL_IF_ROUND_ELSE(36, 0);
   const int16_t header_h = PBL_PLATFORM_SWITCH(PBL_PLATFORM_TYPE_CURRENT,
     24, 24, 24, 24, 32, 32, 24);
 
   s_stale_icon_layer = layer_create(GRect(sw / 2, top_pad, STALE_ICON_W, header_h));
   layer_set_update_proc(s_stale_icon_layer, prv_stale_icon_update_proc);
   s_location_layer = prv_make_text_layer(
-    GRect(4, top_pad, sw / 2 - 4, header_h), header_font, GTextAlignmentLeft);
+    GRect(HEADER_SIDE_INSET, top_pad, sw / 2 - HEADER_SIDE_INSET, header_h),
+    header_font, GTextAlignmentLeft);
   s_time_layer = prv_make_text_layer(
-    GRect(sw / 2, top_pad, sw / 2 - 4, header_h), header_font, GTextAlignmentRight);
+    GRect(sw / 2, top_pad, sw / 2 - HEADER_SIDE_INSET, header_h),
+    header_font, GTextAlignmentRight);
   s_content_layer = layer_create(GRect(0, top_pad + header_h, sw, sh - top_pad - header_h));
   layer_set_update_proc(s_content_layer, prv_content_update_proc);
 
@@ -1107,6 +1187,8 @@ static void prv_init(void) {
 
   s_background_refresh_enabled = persist_exists(PERSIST_KEY_BACKGROUND_REFRESH)
     ? persist_read_bool(PERSIST_KEY_BACKGROUND_REFRESH) : true;
+  s_units_override = persist_exists(PERSIST_KEY_UNITS_OVERRIDE)
+    ? (uint8_t)persist_read_int(PERSIST_KEY_UNITS_OVERRIDE) : UNITS_OVERRIDE_AUTO;
   prv_persist_load();
 
   s_window = window_create();
