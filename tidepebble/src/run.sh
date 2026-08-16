@@ -46,7 +46,7 @@ reset_emulator_state() {
   pkill -f "pebble install --emulator emery --sdk ${TIDEPEBBLE_SDK_VERSION}" 2>/dev/null || true
   sleep 2
 
-  local sdk_root="$HOME/Library/Application Support/Pebble SDK"
+  local sdk_root="$HOME/Library/Application Support/Pebble SDK/$TIDEPEBBLE_SDK_VERSION"
   local flash
   while IFS= read -r flash; do
     mv "$flash" "$flash.bak-$(date +%Y%m%d-%H%M%S)"

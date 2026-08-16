@@ -13,7 +13,7 @@
 - Unit system follows Pebble's own metric/imperial preference.
 - 12h/24h clock follows Pebble's own clock preference.
 - Store assets present: banner (720×320), icons (48, 80, 144px), screenshots.
-- Target platform: `emery` only. Builds via `pebble build`.
+- Target platforms: `emery` (rect) and `gabbro` (round, Pebble Round 2 — 260×260 color touchscreen). Layout is round-aware via `PBL_IF_ROUND_ELSE`; every round-only constant collapses to Emery's original value on rect builds. Builds via `pebble build`.
 
 ## Known gaps / dead code
 
@@ -28,7 +28,8 @@
 
 - Built with Pebble SDK 3, `enableMultiJS: true`.
 - `pebble build` produces `build/TidePebble.pbw`.
-- Emulator target: `pebble install --emulator emery`.
+- Emulator target: `pebble install --emulator emery` (or `--emulator gabbro`).
+- pebble-tool keys running emulators globally by `(platform, sdk_version)`, not per-project — running this repo's emulator alongside another Pebble project that also targets `emery` will fight over the same instance unless pinned to different SDK versions. `run.sh` pins to SDK 4.33 via `PEBBLE_EMULATOR_VERSION` for exactly this reason; `send_tide_message.py` also respects that env var.
 - Phone companion syntax: `node --check src/pkjs/index.js`.
 - No automated test suite.
 

@@ -48,7 +48,12 @@ def main():
     dictionary = parse_fields(sys.argv[2:])
 
     platform = os.environ.get('PEBBLE_EMULATOR_PLATFORM', 'emery')
-    transport = ManagedEmulatorTransport(platform, None, False)
+    # None means "whichever version is alive" — errors out if two same-
+    # platform emulators are running (e.g. this project and another one both
+    # on emery, under different pinned SDK versions). Respect
+    # PEBBLE_EMULATOR_VERSION so that ambiguity doesn't happen.
+    version = os.environ.get('PEBBLE_EMULATOR_VERSION')
+    transport = ManagedEmulatorTransport(platform, version, False)
     connection = PebbleConnection(transport)
     connection.connect()
     connection.run_async()
