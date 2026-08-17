@@ -4,6 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
+PLATFORM="${1:-emery}"
+case "$PLATFORM" in
+  emery|gabbro) ;;
+  *)
+    echo "Invalid watch type '$PLATFORM'. Use emery or gabbro." >&2
+    exit 1
+    ;;
+esac
+
 unset PYTHONPATH
 unset PYTHONHOME
 
@@ -15,10 +24,13 @@ unset PYTHONHOME
 # under a different pinned version alongside this one.
 TIDEPEBBLE_SDK_VERSION="4.33"
 export PEBBLE_EMULATOR_VERSION="$TIDEPEBBLE_SDK_VERSION"
+# Read by send_tide_message.py (invoked from open_config.js) so the config
+# page talks to whichever emulator platform this run actually started.
+export PEBBLE_EMULATOR_PLATFORM="$PLATFORM"
 
 install_with_timeout() {
   local timeout_s="$1"
-  pebble install --emulator emery --sdk "$TIDEPEBBLE_SDK_VERSION" &
+  pebble install --emulator "$PLATFORM" --sdk "$TIDEPEBBLE_SDK_VERSION" &
   local install_pid=$!
 
   for ((i = 0; i < timeout_s; i += 1)); do
@@ -36,28 +48,28 @@ install_with_timeout() {
 }
 
 reset_emulator_state() {
-  echo "Resetting stale Emery emulator state (SDK $TIDEPEBBLE_SDK_VERSION only)..."
+  echo "Resetting stale $PLATFORM emulator state (SDK $TIDEPEBBLE_SDK_VERSION only)..."
   pebble kill 2>/dev/null || true
   # Scoped to this pinned SDK version's paths specifically — a bare
-  # "qemu-pebble"/"pypkjs" pattern would also kill another project's emery
-  # emulator if it's running under a different pinned version alongside this.
+  # "qemu-pebble"/"pypkjs" pattern would also kill another project's emulator
+  # if it's running under a different pinned version alongside this.
   pkill -f "qemu-pebble.*SDKs/${TIDEPEBBLE_SDK_VERSION}/" 2>/dev/null || true
-  pkill -f "pypkjs.*Pebble SDK/${TIDEPEBBLE_SDK_VERSION}/emery" 2>/dev/null || true
-  pkill -f "pebble install --emulator emery --sdk ${TIDEPEBBLE_SDK_VERSION}" 2>/dev/null || true
+  pkill -f "pypkjs.*Pebble SDK/${TIDEPEBBLE_SDK_VERSION}/${PLATFORM}" 2>/dev/null || true
+  pkill -f "pebble install --emulator ${PLATFORM} --sdk ${TIDEPEBBLE_SDK_VERSION}" 2>/dev/null || true
   sleep 2
 
   local sdk_root="$HOME/Library/Application Support/Pebble SDK/$TIDEPEBBLE_SDK_VERSION"
   local flash
   while IFS= read -r flash; do
     mv "$flash" "$flash.bak-$(date +%Y%m%d-%H%M%S)"
-  done < <(find "$sdk_root" -path "*/emery/qemu_spi_flash.bin" -print 2>/dev/null)
+  done < <(find "$sdk_root" -path "*/${PLATFORM}/qemu_spi_flash.bin" -print 2>/dev/null)
 }
 
 pebble clean
 pebble build
 
 # Install to the running emulator, or start one if needed.
-echo "Starting emulator..."
+echo "Starting $PLATFORM emulator..."
 if ! install_with_timeout 45; then
   reset_emulator_state
   echo "Retrying install with clean emulator state..."
