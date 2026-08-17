@@ -2,7 +2,11 @@
 (function() {
   var MARINE_API = 'https://marine-api.open-meteo.com/v1/marine';
   var REVERSE_GEOCODE_API = 'https://api.bigdatacloud.net/data/reverse-geocode-client';
-  var HOURS_TO_SEND = 24;
+  var HOURS_TO_SEND = 30; // must equal TIDE_POINT_COUNT in c/tidepebble.c (7h lookback + 23h forward)
+  // >= half a semi-diurnal tidal period (~12.4h) so the watch can almost always find a
+  // real previous high/low within the fetched window. The watch (s_chart_start) hides
+  // these lookback-only hours from the chart — they only feed local min/max calculations.
+  var LOOKBACK_HOURS = 7;
   var TIDE_CHUNK_SIZE = 12;
   var TIDE_VALUE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
   var SELECTED_LOCATION_KEY = 'tide_selected_location_v1';
@@ -151,6 +155,7 @@
       '&longitude=' + encodeURIComponent(longitude) +
       '&hourly=sea_level_height_msl,swell_wave_height,sea_surface_temperature' +
       '&forecast_days=2' +
+      '&past_days=1' +
       '&timezone=auto';
 
     sendStatus('Loading nearest marine forecast...', label);
@@ -167,7 +172,7 @@
         var heights = data.hourly.sea_level_height_msl;
         var swellHeights = data.hourly.swell_wave_height;
         var seaTemps = data.hourly.sea_surface_temperature;
-        var start = Math.max(0, findFirstCurrentHour(times) - 1);
+        var start = Math.max(0, findFirstCurrentHour(times) - LOOKBACK_HOURS);
         var currentMinutes = Math.round((Date.now() - new Date(times[start]).getTime()) / 60000);
         var waveH = swellHeights && swellHeights[start] != null ? swellHeights[start] : 0;
         var seaT = seaTemps && seaTemps[start] != null ? seaTemps[start] : 0;

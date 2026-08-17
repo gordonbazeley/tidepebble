@@ -18,9 +18,11 @@ Items are rough-priority order. Mark done or delete when shipped.
 
 - [ ] **Swell chart on Overview.** If reinstating swell, overlay a second (dimmer) line on the 24h chart. `s_swell_values` already holds the data. Would need a second min/max pass and a separate color (maybe `GColorLightGray`).
 - [ ] **Double-tap to refresh.** Wire the existing double-tap detection to trigger an `appmessage` back to the phone requesting a refresh, instead of just lighting the screen.
-- [ ] **Newquay fallback opt-out.** Non-UK users see Newquay data while GPS resolves. Could show "Locating…" with no chart instead of showing wrong data.
+- [x] ~~Newquay fallback opt-out.~~ Fallback removed entirely (commit `400a9c3`) — GPS-resolving now shows a status message instead of any fallback data. See `decisions.md`.
+- [ ] **App Glance percent: round to nearest, not up.** `display_percent = ((x + 9) / 10) * 10` always rounds up; the surrounding comment says "nearest". Either fix the math or the comment.
 
 ## Platform / future
 
-- [ ] **Add more target platforms.** Currently `emery` only. `basalt` (Pebble Time) and `chalk` (Pebble Time Round) are common. Test font size selections — the `PBL_PLATFORM_SWITCH` calls are already there for layout, just needs build target additions in `package.json`.
+- [ ] **Add more target platforms.** Currently `emery` and `gabbro`. `basalt` (Pebble Time) and `chalk` (Pebble Time Round) are common. Test font size selections — the `PBL_PLATFORM_SWITCH` calls are already there for layout, just needs build target additions in `package.json`.
 - [ ] **Rebble store listing.** Store assets are ready. Verify app description in `store_assets/app_description.md` and submit to Rebble.
+- [ ] **`run.sh` has no guard against a second concurrent instance for this repo.** SDK-version pinning stops collisions with *other* Pebble projects (see `current-state.md`), but running `run.sh` twice for this repo starts two competing `open_config.js` dev servers against the same emulator. A simple lockfile/pidfile check at the top of `run.sh` would catch this early instead of surfacing as a confusing "wrong location on watch" during testing.

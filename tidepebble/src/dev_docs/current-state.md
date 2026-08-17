@@ -9,6 +9,8 @@
 - NOW card: current tide height, rising/falling arrow, swell height (scalar), sea temp.
 - Event cards (NEXT/THEN/LATER): time-to-tide, tide height, countdown.
 - Overview chart: 24h line, current position dot, high/low arrows with time labels.
+- Beachometer (tide bar): 6-cell fill gauge next to the Overview chart, showing how full the current local tidal range is (not a forecast). See `decisions.md`.
+- App Glance: pin/launcher subtitle showing tide fill % (in/out) and sea temp, or "Tide info out of date" when stale.
 - Settings: GPS mode (phone location) or manual location search via Open-Meteo geocoding.
 - Unit system follows Pebble's own metric/imperial preference.
 - 12h/24h clock follows Pebble's own clock preference.
@@ -22,7 +24,8 @@
 - **`tide_times` is an unused message key.** Declared in `package.json`, but neither `src/pkjs/index.js` nor `src/c/tidepebble.c` reads or writes it.
 - **`settings-html.js` is generated copy and appears out of sync.** `src/pkjs/index.js` requires `settings-html.js`, while `settings.html` is the human-editable source. Update both or regenerate the JS wrapper after settings UI changes.
 - **No mid-sequence chunk recovery.** If a chunk fails mid-transfer, `sendStatus('Tide data unavailable')` fires but the watch may hold partial stale data from the previous session alongside new partial data (offset > 0 but count never updated).
-- **Newquay fallback fires for all non-manual users.** If the user is mid-GPS-resolve, the watch briefly shows Newquay tide data. Not wrong, just potentially confusing for non-UK users.
+- **App Glance percent rounds up, not to nearest.** `prv_glance_reload_callback` rounds `display_percent` to the next 10% (`((x + 9) / 10) * 10`) despite reading as "round to nearest" at a glance — a computed 1-9% always shows as "10%".
+- **Double-instance emulator races are still possible even with the SDK-version pin.** `run.sh`'s pin (see below) stops this repo's emulator from colliding with a *different* Pebble project's, but running `run.sh` twice concurrently for *this* repo (e.g. two terminal tabs/sessions) starts two `open_config.js` dev servers and can race pushes to the same emulator. If location/tide data on the watch looks wrong during dev testing, check for a second `run.sh`/`node open_config.js`/emulator process before assuming the app code regressed.
 
 ## Build / toolchain state
 
@@ -41,8 +44,9 @@
 | `src/pkjs/index.js` | Phone companion: GPS, fetch, encode, send (~290 lines) |
 | `src/pkjs/settings.html` | Settings UI (data-URI page, ~415 lines) |
 | `src/pkjs/settings-html.js` | CommonJS string loaded by pkjs; generated copy of settings.html |
-| `src/open_config.js` | Dev helper: serves settings.html over localhost, pushes chosen location's tides to the emulator via `send_tide_message.py` (live-only, not persisted) |
+| `src/open_config.js` | Dev helper: serves settings.html over localhost pre-filled with a hardcoded `Newgale, Wales` default, pushes chosen location's tides to the emulator via `send_tide_message.py` (live-only, not persisted) |
 | `src/send_tide_message.py` | Dev helper: sends a single AppMessage to the emulator and waits for ACK/NACK before exiting — `pebble send-app-message` doesn't wait for ACK and silently drops messages under load |
+| `src/run.sh` | Dev helper: clean build + install to a pinned-SDK emulator, then launches `open_config.js` |
 | `package.json` | Pebble metadata, message keys |
 | `wscript` | SDK build rules |
 | `store_assets/` | App store images (banner, icons, screenshots) |

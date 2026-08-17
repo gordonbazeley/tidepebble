@@ -26,7 +26,8 @@ var MESSAGE_KEYS_C = path.resolve(PROJECT_ROOT, 'build', 'src', 'message_keys.au
 var SEND_SCRIPT = path.resolve(__dirname, 'send_tide_message.py');
 
 var MARINE_API = 'https://marine-api.open-meteo.com/v1/marine';
-var HOURS_TO_SEND = 24;
+var HOURS_TO_SEND = 30; // keep in sync with pkjs/index.js and TIDE_POINT_COUNT in c/tidepebble.c
+var LOOKBACK_HOURS = 7; // keep in sync with pkjs/index.js — see comment there
 var TIDE_CHUNK_SIZE = 12;
 var TIDE_VALUE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
@@ -95,7 +96,7 @@ async function pushLocationToEmulator(latitude, longitude, label) {
     '?latitude=' + encodeURIComponent(latitude) +
     '&longitude=' + encodeURIComponent(longitude) +
     '&hourly=sea_level_height_msl,swell_wave_height,sea_surface_temperature' +
-    '&forecast_days=2&timezone=auto';
+    '&forecast_days=2&past_days=1&timezone=auto';
 
   var response = await fetch(url);
   if (!response.ok) {
@@ -106,7 +107,7 @@ async function pushLocationToEmulator(latitude, longitude, label) {
   var heights = data.hourly.sea_level_height_msl;
   var swellHeights = data.hourly.swell_wave_height;
   var seaTemps = data.hourly.sea_surface_temperature;
-  var start = Math.max(0, findFirstCurrentHour(times) - 1);
+  var start = Math.max(0, findFirstCurrentHour(times) - LOOKBACK_HOURS);
   var currentMinutes = Math.round((Date.now() - new Date(times[start]).getTime()) / 60000);
   var waveH = swellHeights && swellHeights[start] != null ? swellHeights[start] : 0;
   var seaT = seaTemps && seaTemps[start] != null ? seaTemps[start] : 0;
@@ -292,5 +293,18 @@ server.listen(0, '127.0.0.1', function() {
     console.error('Could not open Brave:', e.message);
     server.close();
     process.exit(1);
+  }
+
+  // Push the default location immediately so the emulator has tide data
+  // without waiting on a manual "Save settings" click — the settings page
+  // is still open for picking somewhere else, which re-pushes on save.
+  if (lastState.mode === 'manual' && lastState.lat != null && lastState.lon != null) {
+    pushLocationToEmulator(lastState.lat, lastState.lon, lastState.location)
+      .then(function(result) {
+        console.log(result.ok ? 'OK:' : 'Skipped:', result.message);
+      })
+      .catch(function(err) {
+        console.error('Auto-push failed:', err.message);
+      });
   }
 });

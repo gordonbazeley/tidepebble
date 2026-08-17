@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define TIDE_POINT_COUNT 24
+#define TIDE_POINT_COUNT 30 // must equal HOURS_TO_SEND in pkjs/index.js (7h lookback + 23h forward)
 #define TIDE_EVENT_COUNT 4
 #define LOCATION_MAX_LEN 48
 #define STATUS_MAX_LEN 48
@@ -84,6 +84,10 @@ static bool s_rising = true;
 static int16_t s_current_value = 0;
 static int16_t s_local_min = 0;
 static int16_t s_local_max = 0;
+// First index the Overview chart plots — hides the lookback-only hours (kept
+// in s_tide_values purely so prv_compute_state can find a real previous
+// turning point) so the chart still shows just the forward-looking window.
+static int16_t s_chart_start = 0;
 static int16_t s_wave_height = 0;
 static int16_t s_sea_temp = 0;
 static char s_time_display[6] = "--:--";
@@ -253,9 +257,10 @@ static void prv_format_minutes_to(char *buffer, size_t buffer_size, int16_t inde
 }
 
 static int16_t prv_current_sample_x(int16_t width) {
-  if (s_tide_count < 2) return 0;
-  int32_t max_minutes = (int32_t)(s_tide_count - 1) * 60;
-  int32_t minutes = s_current_minutes;
+  int16_t visible_count = s_tide_count - s_chart_start;
+  if (visible_count < 2) return 0;
+  int32_t max_minutes = (int32_t)(visible_count - 1) * 60;
+  int32_t minutes = s_current_minutes - (int32_t)s_chart_start * 60;
   if (minutes < 0) minutes = 0;
   if (minutes > max_minutes) minutes = max_minutes;
   return (int16_t)((int32_t)width * minutes / max_minutes);
@@ -281,7 +286,7 @@ static void prv_compute_state(void) {
   }
   s_current_value = s_tide_values[sample] +
     (int16_t)((int32_t)(s_tide_values[sample + 1] - s_tide_values[sample]) * frac / 60);
-  s_rising = s_tide_values[sample + 1] > s_tide_values[sample];
+  s_chart_start = sample;
 
   for (int16_t i = 1; i < s_tide_count - 1 && s_event_count < TIDE_EVENT_COUNT; i++) {
     if (i * 60 <= s_current_minutes) continue;
@@ -294,22 +299,55 @@ static void prv_compute_state(void) {
     }
   }
 
-  int16_t prev_value = s_tide_values[0];
+  bool found_prev = false;
+  int16_t prev_index = -1;
   for (int16_t i = sample; i >= 1; i--) {
     if (prv_is_tide_event(i, true) || prv_is_tide_event(i, false)) {
-      prev_value = s_tide_values[i];
+      prev_index = i;
+      found_prev = true;
       break;
     }
   }
-  int16_t next_value = (s_event_count > 0)
-    ? s_tide_values[s_event_indices[0]]
-    : s_tide_values[s_tide_count - 1];
+
+  int16_t next_value;
+  bool next_is_high;
+  if (s_event_count > 0) {
+    next_value = s_tide_values[s_event_indices[0]];
+    next_is_high = s_event_highs[0];
+  } else {
+    // No confirmed future turning point in the fetched window. Direction
+    // falls back to comparing the last known sample to "now" — kept
+    // consistent with the fill below since both use this same next_value.
+    next_value = s_tide_values[s_tide_count - 1];
+    next_is_high = next_value >= s_current_value;
+  }
+
+  int16_t prev_value;
+  if (found_prev) {
+    prev_value = s_tide_values[prev_index];
+  } else {
+    // No confirmed past turning point either (rare with the wider pkjs
+    // window — e.g. a diurnal-tide location, or fresh partial sync). Bound
+    // using the most extreme *observed* sample on the near side of "now",
+    // in the direction away from where we're heading: real data, not a
+    // fabricated extremum, and far narrower than a whole-series swap.
+    int16_t bound = s_tide_values[0];
+    for (int16_t i = 1; i <= sample; i++) {
+      if (next_is_high) {
+        if (s_tide_values[i] < bound) bound = s_tide_values[i];
+      } else {
+        if (s_tide_values[i] > bound) bound = s_tide_values[i];
+      }
+    }
+    prev_value = bound;
+  }
 
   s_local_min = prev_value < next_value ? prev_value : next_value;
   s_local_max = prev_value > next_value ? prev_value : next_value;
   if (s_local_min == s_local_max) {
     prv_tide_min_max(&s_local_min, &s_local_max);
   }
+  s_rising = next_is_high;
 }
 
 static void prv_draw_arrow(GContext *ctx, bool up, int16_t x, int16_t y) {
@@ -348,15 +386,21 @@ static void prv_draw_chart_event_label(GContext *ctx, const char *text,
     GRect(x, y, label_w, 30), color, GTextAlignmentCenter);
 }
 
-static void prv_tide_min_max(int16_t *min_out, int16_t *max_out) {
-  int16_t min_v = s_tide_values[0], max_v = s_tide_values[0];
-  for (int16_t i = 1; i < s_tide_count; i++) {
+static void prv_tide_min_max_range(int16_t start, int16_t *min_out, int16_t *max_out) {
+  int16_t min_v = s_tide_values[start], max_v = s_tide_values[start];
+  for (int16_t i = start + 1; i < s_tide_count; i++) {
     if (s_tide_values[i] < min_v) min_v = s_tide_values[i];
     if (s_tide_values[i] > max_v) max_v = s_tide_values[i];
   }
   if (max_v == min_v) max_v += 1;
   *min_out = min_v;
   *max_out = max_v;
+}
+
+// Full-series min/max — used by prv_compute_state's degenerate-range fallback,
+// which deliberately wants the whole fetched history, not just what's charted.
+static void prv_tide_min_max(int16_t *min_out, int16_t *max_out) {
+  prv_tide_min_max_range(0, min_out, max_out);
 }
 
 static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
@@ -370,14 +414,18 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
   int16_t plot_h = h - label_h * 2;
   if (plot_h < 10) plot_h = 10;
 
-  if (s_tide_count < 2) {
+  int16_t visible_count = s_tide_count - s_chart_start;
+  if (visible_count < 2) {
     graphics_context_set_stroke_color(ctx, COLOR_DIM);
     graphics_draw_rect(ctx, GRect(frame.origin.x + mx_left, frame.origin.y + my, w, h));
     return;
   }
 
+  // Only the forward-looking window is plotted — s_chart_start skips the
+  // lookback-only hours kept in s_tide_values purely so prv_compute_state
+  // can find a real previous turning point (see s_chart_start comment).
   int16_t min_v, max_v;
-  prv_tide_min_max(&min_v, &max_v);
+  prv_tide_min_max_range(s_chart_start, &min_v, &max_v);
 
   int16_t axis_y = plot_y + plot_h / 2;
   graphics_context_set_stroke_color(ctx, COLOR_DIM);
@@ -386,12 +434,13 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
 
   graphics_context_set_stroke_color(ctx, COLOR_BLUE_LINE);
   GPoint prev = GPoint(frame.origin.x + mx_left, plot_y + plot_h);
-  for (int16_t i = 0; i < s_tide_count; i++) {
-    int16_t x = frame.origin.x + mx_left + (w * i / (s_tide_count - 1));
+  for (int16_t vi = 0; vi < visible_count; vi++) {
+    int16_t i = s_chart_start + vi;
+    int16_t x = frame.origin.x + mx_left + (w * vi / (visible_count - 1));
     int16_t y = plot_y + plot_h -
       ((s_tide_values[i] - min_v) * plot_h / (max_v - min_v));
     GPoint pt = GPoint(x, y);
-    if (i > 0) {
+    if (vi > 0) {
       graphics_draw_line(ctx, GPoint(prev.x, prev.y - 1), GPoint(pt.x, pt.y - 1));
       graphics_draw_line(ctx, prev, pt);
       graphics_draw_line(ctx, GPoint(prev.x, prev.y + 1), GPoint(pt.x, pt.y + 1));
@@ -409,7 +458,7 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
 
   for (int16_t e = 0; e < s_event_count; e++) {
     int16_t index = s_event_indices[e];
-    int16_t ex = frame.origin.x + mx_left + (w * index / (s_tide_count - 1));
+    int16_t ex = frame.origin.x + mx_left + (w * (index - s_chart_start) / (visible_count - 1));
     int16_t ey = plot_y + plot_h -
       ((s_tide_values[index] - min_v) * plot_h / (max_v - min_v));
     prv_draw_chart_event(ctx, s_event_highs[e], ex, ey);
@@ -512,6 +561,12 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
   if (sea_cells < 0) sea_cells = 0;
   if (sea_cells > TIDE_BAR_SEGMENTS) sea_cells = TIDE_BAR_SEGMENTS;
 
+  // Beach anchors at the bottom (i = TIDE_BAR_SEGMENTS-1), sea at the top —
+  // matches looking at a real beach: sand underfoot at the bottom of view,
+  // sea toward the horizon at the top. Sea fills from the top down as
+  // sea_cells grows, so a rising tide's boundary advances downward, toward
+  // the viewer — the arrow below is flipped to point down for a rise to
+  // match (see there).
   bool is_sea_seg[TIDE_BAR_SEGMENTS];
   for (int16_t i = 0; i < TIDE_BAR_SEGMENTS; i++) {
     is_sea_seg[i] = i < sea_cells;
@@ -556,7 +611,12 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
     int16_t boundary_y = (boundary_i >= TIDE_BAR_SEGMENTS)
       ? (is_sea_seg[0] ? padded.origin.y + padded.size.h : padded.origin.y)
       : padded.origin.y + boundary_i * cell_h;
-    GPath *arrow = s_rising ? s_arrow_big_up_path : s_arrow_big_down_path;
+    // Glyph direction follows the boundary's actual movement (down = sea
+    // advancing toward the viewer during a rise, up = sea retreating toward
+    // the horizon during a fall) — the inverse of s_rising itself, which is
+    // an abstract "getting fuller" flag, not a screen direction. Color still
+    // follows s_rising directly (green = flooding, orange = ebbing).
+    GPath *arrow = s_rising ? s_arrow_big_down_path : s_arrow_big_up_path;
     GColor arrow_color = s_rising ? COLOR_HIGH : COLOR_LOW;
     int16_t arrow_x = padded.origin.x + padded.size.w / 2 - ARROW_BIG_W / 2;
     int16_t arrow_y = boundary_y - ARROW_BIG_H / 2;
@@ -573,12 +633,14 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
     graphics_context_set_stroke_color(ctx, arrow_color);
     graphics_context_set_stroke_width(ctx, ARROW_BIG_TAIL_WIDTH);
     if (s_rising) {
-      GPoint tail_start = GPoint(center_x, arrow_y + ARROW_BIG_H);
-      GPoint tail_end = GPoint(center_x, arrow_y + ARROW_BIG_H + ARROW_BIG_TAIL_LEN);
-      graphics_draw_line(ctx, tail_start, tail_end);
-    } else {
+      // Arrow points down (see above) — tail trails above the arrowhead.
       GPoint tail_start = GPoint(center_x, arrow_y);
       GPoint tail_end = GPoint(center_x, arrow_y - ARROW_BIG_TAIL_LEN);
+      graphics_draw_line(ctx, tail_start, tail_end);
+    } else {
+      // Arrow points up — tail trails below the arrowhead.
+      GPoint tail_start = GPoint(center_x, arrow_y + ARROW_BIG_H);
+      GPoint tail_end = GPoint(center_x, arrow_y + ARROW_BIG_H + ARROW_BIG_TAIL_LEN);
       graphics_draw_line(ctx, tail_start, tail_end);
     }
     graphics_context_set_stroke_width(ctx, 1);
@@ -889,6 +951,44 @@ static void prv_content_update_proc(Layer *layer, GContext *ctx) {
   prv_draw_page_dots(ctx, bounds);
 }
 
+static void prv_glance_reload_callback(AppGlanceReloadSession *session, size_t limit,
+                                       void *context) {
+  char buffer[64];
+  if (s_tide_count < 2 || s_is_stale) {
+    snprintf(buffer, sizeof(buffer), "Tide info out of date");
+  } else {
+    int16_t range = s_local_max - s_local_min;
+    int16_t fill_percent = range > 0
+      ? (int16_t)(((int32_t)(s_current_value - s_local_min) * 100 + range / 2) / range)
+      : (s_current_value >= s_local_max ? 100 : 0);
+    if (fill_percent < 0) fill_percent = 0;
+    if (fill_percent > 100) fill_percent = 100;
+    // "In" is how full the tide is; "out" is the complement (how drained).
+    // Round up to the nearest 10% either way.
+    int16_t display_percent = s_rising ? fill_percent : (100 - fill_percent);
+    display_percent = ((display_percent + 9) / 10) * 10;
+    if (display_percent > 100) display_percent = 100;
+    char temp_text[16];
+    prv_format_sea_temp(temp_text, sizeof(temp_text), s_sea_temp);
+    snprintf(buffer, sizeof(buffer), "Tide %d%% %s \xe2\x80\xa2 %s",
+      display_percent, s_rising ? "in" : "out", temp_text);
+  }
+
+  AppGlanceSlice slice = {
+    .layout.icon = APP_GLANCE_SLICE_DEFAULT_ICON,
+    .layout.subtitle_template_string = buffer,
+    .expiration_time = APP_GLANCE_SLICE_NO_EXPIRATION,
+  };
+  AppGlanceResult result = app_glance_add_slice(session, slice);
+  if (result != APP_GLANCE_RESULT_SUCCESS) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "app_glance_add_slice() returned %d", result);
+  }
+}
+
+static void prv_update_glance(void) {
+  app_glance_reload(prv_glance_reload_callback, NULL);
+}
+
 static void prv_set_text(void) {
   time_t now = time(NULL);
   strftime(s_time_display, sizeof(s_time_display), prv_clock_format(), localtime(&now));
@@ -908,6 +1008,7 @@ static void prv_set_text(void) {
   prv_apply_page_background();
   layer_mark_dirty(s_content_layer);
   layer_mark_dirty(s_stale_icon_layer);
+  prv_update_glance();
 }
 
 static void prv_persist_save(void) {
