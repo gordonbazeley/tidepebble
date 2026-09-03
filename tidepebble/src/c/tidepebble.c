@@ -34,6 +34,7 @@
 #define WAKEUP_INTERVAL_SECONDS (60 * 60)
 #define STALE_THRESHOLD_SECONDS (80 * 60)
 #define AUTO_CLOSE_DELAY_MS 5000
+#define IDLE_TIMEOUT_MS (2 * 60 * 1000)
 
 #define PERSIST_KEY_TIDE_VALUES 1
 #define PERSIST_KEY_TIDE_COUNT 2
@@ -101,6 +102,7 @@ static GFont s_compact_time_font;
 static AppTimer *s_double_tap_timer;
 static bool s_waiting_for_double_tap;
 static AppTimer *s_close_timer;
+static AppTimer *s_idle_timer;
 static bool s_is_stale;
 static bool s_background_refresh_enabled = true;
 static uint8_t s_units_override = UNITS_OVERRIDE_AUTO;
@@ -1052,6 +1054,16 @@ static void prv_auto_close_callback(void *context) {
   window_stack_pop_all(true);
 }
 
+static void prv_idle_callback(void *context) {
+  s_idle_timer = NULL;
+  window_stack_pop_all(true);
+}
+
+static void prv_reset_idle_timer(void) {
+  if (s_idle_timer) app_timer_cancel(s_idle_timer);
+  s_idle_timer = app_timer_register(IDLE_TIMEOUT_MS, prv_idle_callback, NULL);
+}
+
 static void prv_wakeup_handler(WakeupId wakeup_id, int32_t cookie) {
   if (!quiet_time_is_active()) {
     prv_send_refresh_request();
@@ -1180,19 +1192,32 @@ static void prv_change_page(TidePage page) {
   layer_mark_dirty(s_content_layer);
 }
 
+static void prv_note_interaction(void) {
+  // A button press during the wakeup-launch window means the user is here on
+  // purpose — cancel the 5s auto-close and let the idle timer govern instead.
+  if (s_close_timer) {
+    app_timer_cancel(s_close_timer);
+    s_close_timer = NULL;
+  }
+  prv_reset_idle_timer();
+}
+
 static void prv_up_click_handler(ClickRecognizerRef recognizer, void *context) {
+  prv_note_interaction();
   if (s_page > TidePageOverview) {
     prv_change_page((TidePage)(s_page - 1));
   }
 }
 
 static void prv_down_click_handler(ClickRecognizerRef recognizer, void *context) {
+  prv_note_interaction();
   if (s_page < TidePageLater) {
     prv_change_page((TidePage)(s_page + 1));
   }
 }
 
 static void prv_select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  prv_note_interaction();
   prv_change_page(TidePageNow);
 }
 
@@ -1320,6 +1345,8 @@ static void prv_init(void) {
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick_handler);
   accel_tap_service_subscribe(prv_tap_handler);
   touch_service_subscribe(prv_touch_handler, NULL);
+
+  prv_reset_idle_timer();
 }
 
 static void prv_deinit(void) {
@@ -1331,6 +1358,9 @@ static void prv_deinit(void) {
   }
   if (s_close_timer) {
     app_timer_cancel(s_close_timer);
+  }
+  if (s_idle_timer) {
+    app_timer_cancel(s_idle_timer);
   }
   window_destroy(s_window);
   gpath_destroy(s_arrow_up_path);
