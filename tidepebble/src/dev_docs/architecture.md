@@ -101,9 +101,13 @@ Populates the pin/launcher subtitle (e.g. "Tide 40% in • 14°") via `app_glanc
 ### Units
 Reads Pebble's own measurement system preference (`HealthMetricWalkedDistanceMeters`). Metric: `m` with one decimal. Imperial: `'` with one decimal (converts via ×328084/1000000). Falls back to metric if health service unavailable.
 
+### What's new pop-up (`prv_maybe_show_whats_new`)
+Shows `WHATS_NEW_TEXT` (scrollable, OK button at the end; Select or Back dismisses) once, on the first non-wakeup launch after an update, when stored `PERSIST_KEY_WHATS_NEW_SEEN` < `WHATS_NEW_ID`. Installs with no saved tide data (`PERSIST_KEY_TIDE_VALUES`) count as fresh: the ID is recorded without showing. To announce a release, bump `WHATS_NEW_ID` and edit the text.
+
 ### Tap / touch handlers
 - `accel_tap_service` (`prv_tap_handler`): detects a double-tap within 500ms, but still only calls `light_enable_interaction()` — no page action wired up (legacy, rect platforms).
 - `touch_service` (`prv_touch_handler`, gabbro/round touchscreen only): maps a touchdown's Y position to the same page navigation as the Up/Down/Select buttons — top third = up, bottom third = down, middle = select.
+- Both handlers return early unless the main window is on top, so taps and touches don't act on the tide pages behind the What's new pop-up.
 
 ### Refresh request
 `prv_send_refresh_request()` sends a `tide_refresh_request` AppMessage to the phone on window load, which triggers `refresh()` in `pkjs/index.js`. (Superseded the old "watch never sends one" behavior.)

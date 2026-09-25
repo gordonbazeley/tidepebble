@@ -14,6 +14,7 @@
 ## Development Commands
 - `pebble build`: compile the watch app.
 - After every successful `pebble build`, run `pebble install --emulator emery`.
+- Every successful `pebble build` drops the JS source map, minifies the phone JS in `build/tidepebble.pbw`, and copies it to `~/Nextcloud/pbws/` (post-build hook in `wscript`; copy skipped if that folder doesn't exist).
 - `pebble logs --emulator emery`: stream emulator logs.
 - `pebble screenshot /tmp/tidepebble.png`: capture the current emulator screen.
 

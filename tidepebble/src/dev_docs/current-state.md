@@ -10,6 +10,7 @@
 - Event cards (NEXT/THEN/LATER): time-to-tide, tide height, countdown.
 - Overview chart: 24h line, current position dot, high/low arrows with time labels.
 - Beachometer (tide bar): 6-cell fill gauge next to the Overview chart, showing how full the current local tidal range is (not a forecast). See `decisions.md`.
+- One-time "What's new" pop-up on the first launch after an update (`WHATS_NEW_ID`).
 - App Glance: pin/launcher subtitle showing tide fill % (in/out) and sea temp, or "Tide info out of date" when stale.
 - Settings: GPS mode (phone location) or manual location search via Open-Meteo geocoding.
 - Unit system follows Pebble's own metric/imperial preference.

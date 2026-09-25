@@ -45,6 +45,11 @@
 #define PERSIST_KEY_LAST_SYNC_EPOCH 7
 #define PERSIST_KEY_BACKGROUND_REFRESH 8
 #define PERSIST_KEY_UNITS_OVERRIDE 9
+#define PERSIST_KEY_WHATS_NEW_SEEN 10
+
+// Bump WHATS_NEW_ID (and edit the text) to show the pop-up once after an update.
+#define WHATS_NEW_ID 1
+#define WHATS_NEW_TEXT "The beachometer arrow now tracks the tide to the minute.\n\nTidePebble returns to your watchface after two minutes idle.\n\nFull release notes in the Pebble app store."
 
 #define UNITS_OVERRIDE_AUTO 0
 #define UNITS_OVERRIDE_METRIC 1
@@ -1156,6 +1161,7 @@ static void prv_double_tap_timeout(void *context) {
 }
 
 static void prv_tap_handler(AccelAxisType axis, int32_t direction) {
+  if (window_stack_get_top_window() != s_window) return; // e.g. What's new pop-up
   light_enable_interaction();
 
   if (s_waiting_for_double_tap) {
@@ -1228,6 +1234,7 @@ static void prv_click_config_provider(void *context) {
 }
 
 static void prv_touch_handler(const TouchEvent *event, void *context) {
+  if (window_stack_get_top_window() != s_window) return; // e.g. What's new pop-up
   if (event->type != TouchEvent_Touchdown) return;
   GRect bounds = layer_get_bounds(window_get_root_layer(s_window));
   int16_t third = bounds.size.h / 3;
@@ -1305,6 +1312,106 @@ static void prv_window_unload(Window *window) {
   layer_destroy(s_stale_icon_layer);
 }
 
+static Window *s_whats_new_window;
+static ScrollLayer *s_whats_new_scroll_layer;
+static TextLayer *s_whats_new_title_layer;
+static TextLayer *s_whats_new_body_layer;
+static Layer *s_whats_new_ok_layer;
+
+static void prv_whats_new_click_handler(ClickRecognizerRef recognizer, void *context) {
+  window_stack_remove(s_whats_new_window, true);
+}
+
+// Up/Down scroll (ScrollLayer's own handlers); Select = OK.
+static void prv_whats_new_click_config_provider(void *context) {
+  window_single_click_subscribe(BUTTON_ID_SELECT, prv_whats_new_click_handler);
+}
+
+static void prv_whats_new_ok_update_proc(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_fill_rect(ctx, bounds, 4, GCornersAll);
+  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_draw_text(ctx, "OK", fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+                     GRect(0, 2, bounds.size.w, bounds.size.h - 4),
+                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+}
+
+static void prv_whats_new_window_load(Window *window) {
+  Layer *window_layer = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(window_layer);
+  const int16_t inset = PBL_IF_ROUND_ELSE(34, 8);
+  const int16_t top = PBL_IF_ROUND_ELSE(20, 4);
+  const int16_t w = bounds.size.w - 2 * inset;
+  const int16_t title_h = 34;
+  const int16_t ok_h = 40;
+
+  s_whats_new_scroll_layer = scroll_layer_create(bounds);
+  scroll_layer_set_shadow_hidden(s_whats_new_scroll_layer, true);
+  scroll_layer_set_click_config_onto_window(s_whats_new_scroll_layer, window);
+  scroll_layer_set_callbacks(s_whats_new_scroll_layer, (ScrollLayerCallbacks) {
+    .click_config_provider = prv_whats_new_click_config_provider,
+  });
+  layer_add_child(window_layer, scroll_layer_get_layer(s_whats_new_scroll_layer));
+
+  s_whats_new_title_layer = text_layer_create(GRect(inset, top, w, title_h));
+  text_layer_set_text(s_whats_new_title_layer, "What's new");
+  text_layer_set_font(s_whats_new_title_layer, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
+  text_layer_set_text_alignment(s_whats_new_title_layer, GTextAlignmentCenter);
+  text_layer_set_background_color(s_whats_new_title_layer, GColorClear);
+  text_layer_set_text_color(s_whats_new_title_layer, GColorWhite);
+  scroll_layer_add_child(s_whats_new_scroll_layer, text_layer_get_layer(s_whats_new_title_layer));
+
+  int16_t body_y = top + title_h;
+  s_whats_new_body_layer = text_layer_create(GRect(inset, body_y, w, 2000));
+  text_layer_set_text(s_whats_new_body_layer, WHATS_NEW_TEXT);
+  text_layer_set_font(s_whats_new_body_layer, fonts_get_system_font(FONT_KEY_GOTHIC_28));
+  text_layer_set_text_alignment(s_whats_new_body_layer, GTextAlignmentCenter);
+  text_layer_set_overflow_mode(s_whats_new_body_layer, GTextOverflowModeWordWrap);
+  text_layer_set_background_color(s_whats_new_body_layer, GColorClear);
+  text_layer_set_text_color(s_whats_new_body_layer, GColorWhite);
+  int16_t body_h = text_layer_get_content_size(s_whats_new_body_layer).h + 8;
+  layer_set_frame(text_layer_get_layer(s_whats_new_body_layer), GRect(inset, body_y, w, body_h));
+  scroll_layer_add_child(s_whats_new_scroll_layer, text_layer_get_layer(s_whats_new_body_layer));
+
+  int16_t ok_y = body_y + body_h + 4;
+  const int16_t ok_w = PBL_IF_ROUND_ELSE(100, w);
+  s_whats_new_ok_layer = layer_create(GRect((bounds.size.w - ok_w) / 2, ok_y, ok_w, ok_h));
+  layer_set_update_proc(s_whats_new_ok_layer, prv_whats_new_ok_update_proc);
+  scroll_layer_add_child(s_whats_new_scroll_layer, s_whats_new_ok_layer);
+
+  scroll_layer_set_content_size(s_whats_new_scroll_layer,
+                                GSize(bounds.size.w, ok_y + ok_h + PBL_IF_ROUND_ELSE(24, 8)));
+}
+
+static void prv_whats_new_window_unload(Window *window) {
+  text_layer_destroy(s_whats_new_title_layer);
+  text_layer_destroy(s_whats_new_body_layer);
+  layer_destroy(s_whats_new_ok_layer);
+  scroll_layer_destroy(s_whats_new_scroll_layer);
+  window_destroy(s_whats_new_window);
+  s_whats_new_window = NULL;
+}
+
+// Shown once per WHATS_NEW_ID on existing installs; fresh installs just record it.
+static void prv_maybe_show_whats_new(bool existing_install) {
+  int32_t seen = persist_exists(PERSIST_KEY_WHATS_NEW_SEEN) ? persist_read_int(PERSIST_KEY_WHATS_NEW_SEEN) : 0;
+  if (seen >= WHATS_NEW_ID) {
+    return;
+  }
+  persist_write_int(PERSIST_KEY_WHATS_NEW_SEEN, WHATS_NEW_ID);
+  if (!existing_install) {
+    return;
+  }
+  s_whats_new_window = window_create();
+  window_set_background_color(s_whats_new_window, GColorBlack);
+  window_set_window_handlers(s_whats_new_window, (WindowHandlers) {
+    .load = prv_whats_new_window_load,
+    .unload = prv_whats_new_window_unload,
+  });
+  window_stack_push(s_whats_new_window, true);
+}
+
 static void prv_init(void) {
   s_arrow_up_path = gpath_create(&s_arrow_up_info);
   s_arrow_down_path = gpath_create(&s_arrow_down_info);
@@ -1315,6 +1422,8 @@ static void prv_init(void) {
     ? persist_read_bool(PERSIST_KEY_BACKGROUND_REFRESH) : true;
   s_units_override = persist_exists(PERSIST_KEY_UNITS_OVERRIDE)
     ? (uint8_t)persist_read_int(PERSIST_KEY_UNITS_OVERRIDE) : UNITS_OVERRIDE_AUTO;
+  // Tide data is written on first sync, so its presence means this is an update.
+  bool existing_install = persist_exists(PERSIST_KEY_TIDE_VALUES);
   prv_persist_load();
 
   s_window = window_create();
@@ -1340,6 +1449,9 @@ static void prv_init(void) {
     if (launched_by_wakeup) {
       s_close_timer = app_timer_register(AUTO_CLOSE_DELAY_MS, prv_auto_close_callback, NULL);
     }
+  }
+  if (!launched_by_wakeup) {
+    prv_maybe_show_whats_new(existing_install);
   }
 
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick_handler);
