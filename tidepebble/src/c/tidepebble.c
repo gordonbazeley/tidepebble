@@ -608,16 +608,19 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
   }
 
   {
-    int16_t boundary_i = TIDE_BAR_SEGMENTS;
-    for (int16_t i = 1; i < TIDE_BAR_SEGMENTS; i++) {
-      if (is_sea_seg[i] != is_sea_seg[0]) {
-        boundary_i = i;
-        break;
-      }
+    // Continuous fill fraction (unrounded), so the arrow tracks "now" to
+    // the minute instead of snapping to one of the TIDE_BAR_SEGMENTS cell
+    // edges like the fill display above.
+    int16_t boundary_y;
+    if (local_range > 0) {
+      boundary_y = padded.origin.y +
+        (int16_t)((int32_t)(s_current_value - s_local_min) * padded.size.h / local_range);
+    } else {
+      boundary_y = (s_current_value >= s_local_max)
+        ? padded.origin.y + padded.size.h : padded.origin.y;
     }
-    int16_t boundary_y = (boundary_i >= TIDE_BAR_SEGMENTS)
-      ? (is_sea_seg[0] ? padded.origin.y + padded.size.h : padded.origin.y)
-      : padded.origin.y + boundary_i * cell_h;
+    if (boundary_y < padded.origin.y) boundary_y = padded.origin.y;
+    if (boundary_y > padded.origin.y + padded.size.h) boundary_y = padded.origin.y + padded.size.h;
     // Glyph direction follows the boundary's actual movement (down = sea
     // advancing toward the viewer during a rise, up = sea retreating toward
     // the horizon during a fall) — the inverse of s_rising itself, which is
@@ -909,6 +912,25 @@ static void prv_draw_empty_page(GContext *ctx, GRect bounds) {
     GTextAlignmentCenter);
 }
 
+static void prv_draw_no_data_page(GContext *ctx, GRect bounds) {
+  prv_draw_text(ctx, "No data available. Check settings in Pebble app", s_text_font,
+    GRect(10, 30, bounds.size.w - 20, bounds.size.h - 60), COLOR_MUTED,
+    GTextAlignmentCenter);
+}
+
+// True once we've synced at least once (s_last_sync_epoch set) but "now" no
+// longer has real data behind it — either the fetched window's forward edge
+// has been outlived, or (defensively) the series itself shrank back below 2
+// points. Distinct from s_is_stale, which just warns; this means the
+// beachometer/chart would otherwise be showing a frozen, possibly very old
+// reading, so the normal pages are replaced outright rather than dimmed.
+static bool prv_no_current_data(void) {
+  if (s_last_sync_epoch <= 0) return false;
+  if (s_tide_count < 2) return true;
+  int16_t max_minutes = (int16_t)(s_tide_count - 1) * 60;
+  return s_current_minutes < 0 || s_current_minutes > max_minutes;
+}
+
 static GColor prv_page_background_color(void) {
   if (s_page == TidePageNow) {
     return COLOR_NOW_CARD;
@@ -933,9 +955,14 @@ static void prv_content_update_proc(Layer *layer, GContext *ctx) {
   graphics_context_set_fill_color(ctx, prv_page_background_color());
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
-  if (s_tide_count < 2) {
+  if (s_tide_count < 2 && s_last_sync_epoch <= 0) {
     prv_draw_empty_page(ctx, bounds);
     prv_draw_page_dots(ctx, bounds);
+    return;
+  }
+
+  if (prv_no_current_data()) {
+    prv_draw_no_data_page(ctx, bounds);
     return;
   }
 

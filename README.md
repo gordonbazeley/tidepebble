@@ -11,6 +11,18 @@ The JavaScript phone companion:
 
 The watch app displays a blue tide-height chart, high and low tide labels, axis values, and a green interpolated marker for the current time.
 
+## Beachometer
+
+The vertical bar on the left of the Now/Overview pages ("beachometer") is a quick-glance gauge of how much beach is exposed right now. It's not a mini chart of the next few hours — it's a snapshot of *now*, always split into six hourly cells: sea (wave texture) filling from the top, beach (sand texture) from the bottom, sized by where the current tide height sits.
+
+An arrow sits at the sea/beach boundary and points in the direction the tide is heading — down while rising (sea advancing over the beach), up while falling (sea retreating). Unlike the main beachometer with six hourly cells, the marker's position is in real time: it's placed at the exact tide height for the current minute.
+
+This makes a bit more sense with some examples:
+
+| Falling — lots of beach | Mid tide — balanced | Rising — little beach |
+| --- | --- | --- |
+| ![Falling tide, most of the bar is beach](docs/images/beachometer-falling.png) | ![Mid tide, beach and sea roughly balanced](docs/images/beachometer-mid.png) | ![Rising tide, most of the bar is sea](docs/images/beachometer-rising.png) |
+
 ## Build
 
 ```sh

@@ -10,6 +10,7 @@
 - Event cards (NEXT/THEN/LATER): time-to-tide, tide height, countdown.
 - Overview chart: 24h line, current position dot, high/low arrows with time labels.
 - Beachometer (tide bar): 6-cell fill gauge next to the Overview chart, showing how full the current local tidal range is (not a forecast). See `decisions.md`.
+- "No data available" page replaces the normal pages once synced data has run out (`prv_no_current_data`: "now" outside the fetched window, or series < 2 points). Before the first-ever sync the original empty page shows. Distinct from `s_is_stale`, which only warns.
 - One-time "What's new" pop-up on the first launch after an update (`WHATS_NEW_ID`).
 - App Glance: pin/launcher subtitle showing tide fill % (in/out) and sea temp, or "Tide info out of date" when stale.
 - Settings: GPS mode (phone location) or manual location search via Open-Meteo geocoding.
@@ -23,7 +24,7 @@
 - **`s_swell_values` is populated but never rendered.** Per-hour swell data arrives and is parsed into the array, but no draw function reads it. The swell chart was backed out at `e8271bf`. Either delete the swell parse path or wire up a chart.
 - **Double-tap handler does nothing.** `prv_tap_handler` detects a double-tap within 500ms but the second tap only calls `light_enable_interaction()` and clears the timer — no page action. Likely a WIP navigation gesture.
 - **`tide_times` is an unused message key.** Declared in `package.json`, but neither `src/pkjs/index.js` nor `src/c/tidepebble.c` reads or writes it.
-- **`settings-html.js` is generated copy and appears out of sync.** `src/pkjs/index.js` requires `settings-html.js`, while `settings.html` is the human-editable source. Update both or regenerate the JS wrapper after settings UI changes.
+- **`settings-html.js` is a hand-synced copy of `settings.html`.** `src/pkjs/index.js` requires `settings-html.js`; `settings.html` is the human-editable source. Update both after settings UI changes (no generator yet; see `AGENTS.md`).
 - **No mid-sequence chunk recovery.** If a chunk fails mid-transfer, `sendStatus('Tide data unavailable')` fires but the watch may hold partial stale data from the previous session alongside new partial data (offset > 0 but count never updated).
 - **App Glance percent rounds up, not to nearest.** `prv_glance_reload_callback` rounds `display_percent` to the next 10% (`((x + 9) / 10) * 10`) despite reading as "round to nearest" at a glance — a computed 1-9% always shows as "10%".
 - **Double-instance emulator races are still possible even with the SDK-version pin.** `run.sh`'s pin (see below) stops this repo's emulator from colliding with a *different* Pebble project's, but running `run.sh` twice concurrently for *this* repo (e.g. two terminal tabs/sessions) starts two `open_config.js` dev servers and can race pushes to the same emulator. If location/tide data on the watch looks wrong during dev testing, check for a second `run.sh`/`node open_config.js`/emulator process before assuming the app code regressed.
