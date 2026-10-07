@@ -49,6 +49,7 @@
 | `src/open_config.js` | Dev helper: serves settings.html over localhost pre-filled with a hardcoded `Newgale, Wales` default, pushes chosen location's tides to the emulator via `send_tide_message.py` (live-only, not persisted) |
 | `src/send_tide_message.py` | Dev helper: sends a single AppMessage to the emulator and waits for ACK/NACK before exiting — `pebble send-app-message` doesn't wait for ACK and silently drops messages under load |
 | `src/run.sh` | Dev helper: clean build + install to a pinned-SDK emulator, then launches `open_config.js` |
+| `src/beachometer_screenshots.py` | Dev helper: pushes a synthetic tide series to the emery emulator, screenshots each scenario in `src/beachometer_annotations.md` and writes annotated PNGs to `docs/images/` (needs Pillow; emulator can wedge — re-run or restart it). Per-scenario `summary`/`summary_detail` override the label defaults; detail always sits under the summary title |
 | `package.json` | Pebble metadata, message keys |
 | `wscript` | SDK build rules |
 | `store_assets/` | App store images (banner, icons, screenshots) |

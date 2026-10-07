@@ -12,32 +12,35 @@ normally brought up.
 minutes into the 30h test series the script generates — a 12h sine wave, so
 0/360/720/... are low tide, 180/540/900/... are high tide). `direction` must
 be `falling` or `rising` and controls which arrow color the script looks for
-when placing the "Marker" callout.
+when placing the "summary" callout.
+
+Any scenario may set `summary` and/or `summary_detail` to override the
+defaults under `## labels`.
 
 ## labels
 
 sea = Sea
 beach = Beach
-marker = Marker:
-marker_detail = exact tide right now, to the minute
+summary = Summary
+summary_detail = How much beach is there right now and which way is the tide going?
 
 ## falling
 
 minutes = 447
 direction = falling
-title = FALLING TIDE — lots of beach
-subtitle = Sea retreating: most of the bar is sand, arrow points up.
+summary = Tide almost out
+summary_detail = Large beach and tide still going out
 
 ## mid
 
 minutes = 360
 direction = falling
-title = MID TIDE — beach and sea balanced
-subtitle = Roughly half sand, half sea (tide still falling here).
+summary = Tide half way out
+summary_detail = Half the beach is present and the tide is still going out
 
 ## rising
 
 minutes = 807
 direction = rising
-title = RISING TIDE — little beach
-subtitle = Sea advancing: most of the bar is water, arrow points down.
+summary = Tide mostly in, small beach
+summary_detail = Small beach and the tide still coming in

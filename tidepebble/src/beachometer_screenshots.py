@@ -13,9 +13,9 @@ send_tide_message.py) and to the `pebble` CLI for install/screenshot.
 """
 import json
 import math
+import os
 import subprocess
 import sys
-import textwrap
 import time
 from pathlib import Path
 
@@ -45,8 +45,8 @@ ARROW_COLORS = {
     'rising': (158, 229, 148),
 }
 BAR_COLORS = {SEA_COLOR, SAND_COLOR, *ARROW_COLORS.values()}
-FONT_BOLD = ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial Bold.ttf', 22)
-FONT = ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf', 18)
+FONT_BOLD = ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial Bold.ttf', 55)
+FONT = ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf', 44)
 
 
 def parse_rules(path):
@@ -99,7 +99,9 @@ def run_pebble(args):
 
 
 def send_message(uuid, fields):
-    run([str(PEBBLE_TOOL_PYTHON), str(SRC_DIR / 'send_tide_message.py'), uuid, *fields])
+    # Pin the emulator version: another project's emery emulator may be running too.
+    env = {**os.environ, 'PEBBLE_EMULATOR_VERSION': SDK_VERSION}
+    run([str(PEBBLE_TOOL_PYTHON), str(SRC_DIR / 'send_tide_message.py'), uuid, *fields], env=env)
 
 
 def screenshot(out_path):
@@ -124,41 +126,60 @@ def section_mid(rows, fallback):
     return (min(rows) + max(rows)) // 2 if rows else fallback
 
 
-def annotate(raw_path, out_path, labels, title, subtitle, direction):
+def wrap_px(draw, text, max_w):
+    lines, line = [], ''
+    for word in text.split():
+        trial = f'{line} {word}'.strip()
+        if line and draw.textlength(trial, font=FONT) > max_w:
+            lines.append(line)
+            line = word
+        else:
+            line = trial
+    return lines + [line]
+
+
+def annotate(raw_path, out_path, labels, rule):
+    direction = rule['direction']
     im = Image.open(raw_path).convert('RGB')
     bar_rows = find_rows(im, BAR_COLORS)
     bar_top, bar_bottom = (min(bar_rows), max(bar_rows)) if bar_rows else (30, im.height - 1)
     sea_mid = section_mid(find_rows(im, {SEA_COLOR}), bar_top)
     sand_mid = section_mid(find_rows(im, {SAND_COLOR}), bar_bottom)
-    marker_rows = find_rows(im, {ARROW_COLORS.get(direction)})
-    marker_y = (min(marker_rows) + max(marker_rows)) // 2 if marker_rows else None
+    summary_rows = find_rows(im, {ARROW_COLORS.get(direction)})
+    summary_y = (min(summary_rows) + max(summary_rows)) // 2 if summary_rows else None
 
     scaled = im.resize((im.width * SCALE, im.height * SCALE), Image.NEAREST)
-    top_h = 60
-    canvas = Image.new('RGB', (scaled.width + 300, scaled.height + top_h + 50), (18, 18, 20))
+    top_h = 20
+    width = scaled.width + 760
+    image_right_x = scaled.width
+    label_x = scaled.width + 24
+    text_x = label_x + 6
+
+    sea_y = top_h + sea_mid * SCALE
+    beach_y = top_h + sand_mid * SCALE
+    my = top_h + (summary_y * SCALE if summary_y is not None else scaled.height // 2)
+    detail_lines = wrap_px(ImageDraw.Draw(Image.new('RGB', (1, 1))),
+                           rule.get('summary_detail', labels['summary_detail']), width - text_x - 10)
+    detail_bottom = my + 15 + len(detail_lines) * 49
+    # The detail always sits under the summary title; if it would reach the
+    # Beach label, push that label (not its arrow) down and grow the canvas.
+    beach_label_y = max(beach_y - 25, detail_bottom + 10)
+    height = max(scaled.height + top_h + 20, beach_label_y + 55 + 20)
+
+    canvas = Image.new('RGB', (width, height), (18, 18, 20))
     canvas.paste(scaled, (0, top_h))
     draw = ImageDraw.Draw(canvas)
 
-    draw.text((14, 12), title, font=FONT_BOLD, fill=(255, 255, 255))
-    draw.text((14, top_h + scaled.height + 14), subtitle, font=FONT, fill=(200, 200, 200))
-
-    image_right_x = scaled.width
-    label_x = scaled.width + 24
-
-    sea_y = top_h + sea_mid * SCALE
     draw_callout(draw, sea_y, image_right_x, label_x, SEA_COLOR)
-    draw.text((label_x + 6, sea_y - 10), labels['sea'], font=FONT_BOLD, fill=SEA_COLOR)
+    draw.text((text_x, sea_y - 25), labels['sea'], font=FONT_BOLD, fill=SEA_COLOR)
 
-    beach_y = top_h + sand_mid * SCALE
     draw_callout(draw, beach_y, image_right_x, label_x, SAND_COLOR)
-    draw.text((label_x + 6, beach_y - 10), labels['beach'], font=FONT_BOLD, fill=SAND_COLOR)
+    draw.text((text_x, beach_label_y), labels['beach'], font=FONT_BOLD, fill=SAND_COLOR)
 
-    my = top_h + (marker_y * SCALE if marker_y is not None else scaled.height // 2)
     draw_callout(draw, my, image_right_x, label_x, (255, 255, 255))
-    draw.text((label_x + 6, my - 14), labels['marker'], font=FONT_BOLD, fill=(255, 255, 255))
-    detail_lines = textwrap.wrap(labels['marker_detail'], width=16)
+    draw.text((text_x, my - 34), rule.get('summary', labels['summary']), font=FONT_BOLD, fill=(255, 255, 255))
     for i, line in enumerate(detail_lines):
-        draw.text((label_x + 6, my + 6 + i * 20), line, font=FONT, fill=(220, 220, 220))
+        draw.text((text_x, my + 15 + i * 49), line, font=FONT, fill=(220, 220, 220))
 
     canvas.save(out_path)
 
@@ -197,8 +218,7 @@ def main():
         send_message(uuid, [f"i:{keys['tide_current_minutes']}={rule['minutes']}"])
         raw_path = OUT_DIR / f'_raw-{name}.png'
         screenshot(raw_path)
-        annotate(raw_path, OUT_DIR / f'beachometer-{name}.png', labels,
-                 rule['title'], rule['subtitle'], rule['direction'])
+        annotate(raw_path, OUT_DIR / f'beachometer-{name}.png', labels, rule)
         raw_path.unlink()
 
     print(f'Done. Images in {OUT_DIR}/')
