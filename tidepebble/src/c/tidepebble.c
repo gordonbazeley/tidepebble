@@ -824,7 +824,7 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   prv_format_sea_temp(temp_text, sizeof(temp_text), s_sea_temp);
 
   prv_draw_card_background(ctx, frame, GColorBlack);
-  int16_t x = frame.origin.x + 6;
+  int16_t x = frame.origin.x + 10;
   int16_t header_y = frame.origin.y + PAGE_MARGIN;
   int16_t header_h = 28;
   prv_draw_text(ctx, "NOW", s_label_font, GRect(x, header_y, 52, header_h),
@@ -839,7 +839,7 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   int16_t rows_y = header_y + header_h;
   int16_t rows_h = frame.origin.y + frame.size.h - PAGE_MARGIN - rows_y;
   int16_t row_h = rows_h / 3;
-  int16_t row_w = frame.size.w - 18;
+  int16_t row_w = frame.size.w - 12;
 
   GSize widest_label = graphics_text_layout_get_content_size("Waves", s_large_label_font,
     GRect(0, 0, row_w, row_h), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
