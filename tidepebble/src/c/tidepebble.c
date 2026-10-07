@@ -812,6 +812,11 @@ static void prv_draw_now_row(GContext *ctx, GRect frame, const char *label, int1
     GRect(frame.origin.x, frame.origin.y, frame.size.w, frame.size.h), COLOR_MUTED,
     GTextAlignmentLeft);
 
+  // Keep the icon clear of the value (e.g. a wider "-2.0m"); icons are <= 16px wide.
+  GSize value_size = graphics_text_layout_get_content_size(value, s_large_detail_font, frame,
+    GTextOverflowModeTrailingEllipsis, GTextAlignmentRight);
+  int16_t max_icon_x = frame.origin.x + frame.size.w - value_size.w - 16 - 3;
+  if (icon_x > max_icon_x) icon_x = max_icon_x;
   icon_fn(ctx, GPoint(icon_x, frame.origin.y + (frame.size.h - icon_h) / 2), GColorWhite);
 
   prv_draw_text(ctx, value, s_large_detail_font, frame, GColorWhite, GTextAlignmentRight);
