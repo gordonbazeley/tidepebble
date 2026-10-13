@@ -12,7 +12,7 @@
 - `package.json`: Pebble metadata, targets, and message keys.
 
 ## Development Commands
-- `pebble build`: compile the watch app. Always follow a successful build with `pebble install --emulator emery`.
+- `pebble build`: compile the watch app. Always follow a successful build with `pebble install --emulator emery`. For the round target also check `pebble install --emulator gabbro` (`src/run.sh gabbro`).
 - Post-build hook (`wscript`): drops the JS source map, minifies the phone JS in `build/tidepebble.pbw`, and copies the pbw to `~/Nextcloud/pbws/` (skipped if that folder doesn't exist).
 - `pebble logs --emulator emery`: stream emulator logs.
 - `pebble screenshot /tmp/tidepebble.png`: capture the current emulator screen.
