@@ -844,7 +844,7 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
   int16_t rows_y = header_y + header_h;
   int16_t rows_h = frame.origin.y + frame.size.h - PAGE_MARGIN - rows_y;
   int16_t row_h = rows_h / 3;
-  int16_t row_w = frame.size.w - 12;
+  int16_t row_w = frame.size.w - (x - frame.origin.x) - 4;
 
   GSize widest_label = graphics_text_layout_get_content_size("Waves", s_large_label_font,
     GRect(0, 0, row_w, row_h), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
