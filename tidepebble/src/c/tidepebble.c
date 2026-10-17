@@ -48,8 +48,8 @@
 #define PERSIST_KEY_WHATS_NEW_SEEN 10
 
 // Bump WHATS_NEW_ID (and edit the text) to show the pop-up once after an update.
-#define WHATS_NEW_ID 1
-#define WHATS_NEW_TEXT "The beachometer arrow now tracks the tide to the minute.\n\nTidePebble returns to your watchface after two minutes idle.\n\nFull release notes in the Pebble app store."
+#define WHATS_NEW_ID 2
+#define WHATS_NEW_TEXT "Clearer separation of hour blocks on beachometer\n\nGlance text now accurate if no connection to phone"
 
 #define UNITS_OVERRIDE_AUTO 0
 #define UNITS_OVERRIDE_METRIC 1
@@ -484,7 +484,8 @@ static void prv_draw_chart(GContext *ctx, GRect frame, bool labels) {
 #define TIDE_BAR_WAVE_PERIOD 10
 #define TIDE_BAR_WAVE_AMP 3
 #define TIDE_BAR_WAVE_ROW_H 7
-#define TIDE_BAR_SAND_ROW_H 6
+#define TIDE_BAR_PAIR_GAP 3
+#define TIDE_BAR_SAND_ROW_H 7
 #define TIDE_BAR_SAND_SPACING 7
 #define TIDE_BAR_SAND_SHIFT 3
 #define TIDE_BAR_SAND_RADIUS 1
@@ -591,14 +592,22 @@ static void prv_draw_tide_bar(GContext *ctx, GRect frame) {
     bool is_sea = is_sea_seg[i];
 
     if (is_sea) {
+      // Wave rows in pairs with an extra gap after each pair, so the sea
+      // reads as hour blocks.
+      int16_t k = 0;
       for (int16_t ry = cell.origin.y + TIDE_BAR_WAVE_AMP + 2;
-           ry < cell.origin.y + cell.size.h; ry += TIDE_BAR_WAVE_ROW_H) {
+           ry < cell.origin.y + cell.size.h; ry += TIDE_BAR_WAVE_ROW_H, k++) {
+        if (k > 0 && k % 2 == 0) ry += TIDE_BAR_PAIR_GAP;
+        if (ry >= cell.origin.y + cell.size.h) break;
         prv_draw_tide_bar_wave_row(ctx, cell, ry, wave_row);
         wave_row++;
       }
     } else {
+      int16_t k = 0;
       for (int16_t ry = cell.origin.y + TIDE_BAR_SAND_RADIUS + 2;
-           ry < cell.origin.y + cell.size.h; ry += TIDE_BAR_SAND_ROW_H) {
+           ry < cell.origin.y + cell.size.h; ry += TIDE_BAR_SAND_ROW_H, k++) {
+        if (k > 0 && k % 2 == 0) ry += TIDE_BAR_PAIR_GAP;
+        if (ry >= cell.origin.y + cell.size.h) break;
         prv_draw_tide_bar_sand_row(ctx, cell, ry, sand_row);
         sand_row++;
       }
@@ -858,17 +867,24 @@ static void prv_draw_now_card(GContext *ctx, GRect frame) {
     prv_draw_tape_icon, TAPE_ICON_H, height_text);
 }
 
+// Draws the black bar backdrop + tide bar in the position shared by the NOW
+// and Overview pages; `content` is the page's content rect.
+static GRect prv_draw_shared_tide_bar(GContext *ctx, GRect bounds, GRect content) {
+  int16_t top_margin = content.origin.y;
+  GRect bar_content = GRect(content.origin.x, top_margin, content.size.w,
+    bounds.size.h - top_margin - ROUND_BOTTOM_EXTRA);
+  GRect bg_frame = GRect(0, bar_content.origin.y, bar_content.origin.x + bar_content.size.w,
+    bar_content.size.h);
+  prv_draw_card_background(ctx, bg_frame, GColorBlack);
+  return prv_draw_tide_bar_for_content(ctx, bar_content);
+}
+
 static void prv_draw_now_page(GContext *ctx, GRect bounds) {
   int16_t top_margin = 3;
   int16_t bottom_margin = PAGE_MARGIN + ROUND_BOTTOM_EXTRA;
   GRect content = GRect(PAGE_MARGIN, top_margin, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
     bounds.size.h - top_margin - bottom_margin);
-  GRect bar_content = GRect(content.origin.x, content.origin.y, content.size.w,
-    bounds.size.h - top_margin - ROUND_BOTTOM_EXTRA);
-  GRect bg_frame = GRect(0, bar_content.origin.y, bar_content.origin.x + bar_content.size.w,
-    bar_content.size.h);
-  prv_draw_card_background(ctx, bg_frame, GColorBlack);
-  GRect bar_frame = prv_draw_tide_bar_for_content(ctx, bar_content);
+  GRect bar_frame = prv_draw_shared_tide_bar(ctx, bounds, content);
   GRect now_card = GRect(content.origin.x + bar_frame.size.w + TIDE_BAR_GAP, content.origin.y,
     content.size.w - bar_frame.size.w - TIDE_BAR_GAP, content.size.h);
   prv_draw_now_card(ctx, now_card);
@@ -896,15 +912,11 @@ static void prv_draw_later_page(GContext *ctx, GRect bounds) {
 }
 
 static void prv_draw_overview_page(GContext *ctx, GRect bounds) {
-  prv_draw_text(ctx, "OVERVIEW", s_label_font,
-    GRect(HEADER_SIDE_INSET, 0, bounds.size.w / 2, 28), COLOR_MUTED, GTextAlignmentLeft);
-  prv_draw_text(ctx, "NEXT 24H", s_label_font,
-    GRect(bounds.size.w / 2 - 2, 0, bounds.size.w / 2 - HEADER_SIDE_INSET - 14, 28), COLOR_DIM,
-    GTextAlignmentRight);
-
-  GRect content = GRect(PAGE_MARGIN, 28, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
-    bounds.size.h - 30 - PBL_IF_ROUND_ELSE(28, 0));
-  GRect bar_frame = prv_draw_tide_bar_for_content(ctx, content);
+  // Same top margin/height as the NOW page so the bar matches it exactly.
+  int16_t top_margin = 3;
+  GRect content = GRect(PAGE_MARGIN, top_margin, bounds.size.w - PAGE_MARGIN - PAGE_DOTS_W,
+    bounds.size.h - top_margin - PAGE_MARGIN - ROUND_BOTTOM_EXTRA);
+  GRect bar_frame = prv_draw_shared_tide_bar(ctx, bounds, content);
   GRect chart_frame = GRect(content.origin.x + bar_frame.size.w + TIDE_BAR_GAP, content.origin.y,
     content.size.w - bar_frame.size.w - TIDE_BAR_GAP, content.size.h);
 
@@ -993,7 +1005,7 @@ static void prv_content_update_proc(Layer *layer, GContext *ctx) {
 static void prv_glance_reload_callback(AppGlanceReloadSession *session, size_t limit,
                                        void *context) {
   char buffer[64];
-  if (s_tide_count < 2 || s_is_stale) {
+  if (s_tide_count < 2 || prv_no_current_data()) {
     snprintf(buffer, sizeof(buffer), "Tide info out of date");
   } else {
     int16_t range = s_local_max - s_local_min;

@@ -75,3 +75,7 @@
 **Chose:** `localStorage` with key `tide_selected_location_v1`.  
 **Why:** Pebble JS localStorage survives app restarts. The `_v1` suffix allows future schema migration without collision.  
 **Trade-off:** Cleared if the user reinstalls the app.
+
+## Beachometer hour-block separation and Overview title removal
+**Chose:** Wave and sand rows are drawn in pairs with a 3px gap after each pair (`TIDE_BAR_PAIR_GAP`), rather than divider lines between cells (tried; too heavy). Sand row pitch raised 6 -> 7px to match the wave rows. The Overview "OVERVIEW" / "NEXT 24H" title row was removed so its bar matches the NOW page exactly (shared `prv_draw_shared_tide_bar`).  
+**Also:** the App Glance no longer switches to "Tide info out of date" merely because data is stale; only when there is no usable data.

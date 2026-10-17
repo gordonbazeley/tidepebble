@@ -9,10 +9,10 @@
 - NOW card: current tide height, rising/falling arrow, swell height (scalar), sea temp.
 - Event cards (NEXT/THEN/LATER): time-to-tide, tide height, countdown.
 - Overview chart: 24h line, current position dot, high/low arrows with time labels.
-- Beachometer (tide bar): 6-cell fill gauge next to the Overview chart, showing how full the current local tidal range is (not a forecast). See `decisions.md`.
+- Beachometer (tide bar): 6-cell fill gauge (rows drawn in pairs with a 3px gap, so each hour block reads separately) at the same size/position on the Overview and NOW pages, showing how full the current local tidal range is (not a forecast). See `decisions.md`.
 - "No data available" page replaces the normal pages once synced data has run out (`prv_no_current_data`: "now" outside the fetched window, or series < 2 points). Before the first-ever sync the original empty page shows. Distinct from `s_is_stale`, which only warns.
 - One-time "What's new" pop-up on the first launch after an update (`WHATS_NEW_ID`).
-- App Glance: pin/launcher subtitle showing tide fill % (in/out) and sea temp, or "Tide info out of date" when stale.
+- App Glance: pin/launcher subtitle showing tide fill % (in/out) and sea temp, or "Tide info out of date" only when there is no usable data (stale-but-cached data still shows the normal text).
 - Settings: GPS mode (phone location) or manual location search via Open-Meteo geocoding.
 - Unit system follows Pebble's own metric/imperial preference.
 - 12h/24h clock follows Pebble's own clock preference.
