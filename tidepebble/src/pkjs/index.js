@@ -1,7 +1,7 @@
 /* Tide chart data bridge: phone GPS -> Open-Meteo Marine API -> Pebble watch. */
 (function() {
   var MARINE_API = 'https://marine-api.open-meteo.com/v1/marine';
-  var REVERSE_GEOCODE_API = 'https://api.bigdatacloud.net/data/reverse-geocode-client';
+  var REVERSE_GEOCODE_API = 'https://api-bdc.io/data/reverse-geocode-client';
   var HOURS_TO_SEND = 30; // must equal TIDE_POINT_COUNT in c/tidepebble.c (7h lookback + 23h forward)
   // >= half a semi-diurnal tidal period (~12.4h) so the watch can almost always find a
   // real previous high/low within the fetched window. The watch (s_chart_start) hides
@@ -109,6 +109,16 @@
 
   function reverseGeocode(latitude, longitude, onComplete) {
     var fallback = locationLabel(latitude, longitude);
+    // Cache by ~1km cell so routine refreshes don't hit the network (each new
+    // host/request can raise a connect prompt on the watch).
+    var cacheKey = 'geocode_' + latitude.toFixed(2) + ',' + longitude.toFixed(2);
+    try {
+      var cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        onComplete(cached);
+        return;
+      }
+    } catch (error) {}
     var request = new XMLHttpRequest();
     request.open('GET', REVERSE_GEOCODE_API +
       '?latitude=' + encodeURIComponent(latitude) +
@@ -121,7 +131,11 @@
       }
       try {
         var data = JSON.parse(request.responseText);
-        onComplete(data.city || data.locality || data.principalSubdivision || fallback);
+        var name = data.city || data.locality || data.principalSubdivision;
+        if (name) {
+          try { localStorage.setItem(cacheKey, name); } catch (error) {}
+        }
+        onComplete(name || fallback);
       } catch (error) {
         onComplete(fallback);
       }

@@ -1002,38 +1002,77 @@ static void prv_content_update_proc(Layer *layer, GContext *ctx) {
   prv_draw_page_dots(ctx, bounds);
 }
 
-static void prv_glance_reload_callback(AppGlanceReloadSession *session, size_t limit,
-                                       void *context) {
-  char buffer[64];
-  if (s_tide_count < 2 || prv_no_current_data()) {
-    snprintf(buffer, sizeof(buffer), "Tide info out of date");
-  } else {
-    int16_t range = s_local_max - s_local_min;
-    int16_t fill_percent = range > 0
-      ? (int16_t)(((int32_t)(s_current_value - s_local_min) * 100 + range / 2) / range)
-      : (s_current_value >= s_local_max ? 100 : 0);
-    if (fill_percent < 0) fill_percent = 0;
-    if (fill_percent > 100) fill_percent = 100;
-    // "In" is how full the tide is; "out" is the complement (how drained).
-    // Round up to the nearest 10% either way.
-    int16_t display_percent = s_rising ? fill_percent : (100 - fill_percent);
-    display_percent = ((display_percent + 9) / 10) * 10;
-    if (display_percent > 100) display_percent = 100;
-    char temp_text[16];
-    prv_format_sea_temp(temp_text, sizeof(temp_text), s_sea_temp);
-    snprintf(buffer, sizeof(buffer), "Tide %d%% %s \xe2\x80\xa2 %s",
-      display_percent, s_rising ? "in" : "out", temp_text);
-  }
+#define GLANCE_STEP_MINUTES 20
+#define GLANCE_HORIZON_STEPS 18
 
+static void prv_glance_text(char *buffer, size_t size) {
+  if (s_tide_count < 2 || prv_no_current_data()) {
+    snprintf(buffer, size, "Tide info out of date");
+    return;
+  }
+  int16_t range = s_local_max - s_local_min;
+  int16_t fill_percent = range > 0
+    ? (int16_t)(((int32_t)(s_current_value - s_local_min) * 100 + range / 2) / range)
+    : (s_current_value >= s_local_max ? 100 : 0);
+  if (fill_percent < 0) fill_percent = 0;
+  if (fill_percent > 100) fill_percent = 100;
+  // "In" is how full the tide is; "out" is the complement (how drained).
+  // Round up to the nearest 10% either way.
+  int16_t display_percent = s_rising ? fill_percent : (100 - fill_percent);
+  display_percent = ((display_percent + 9) / 10) * 10;
+  if (display_percent > 100) display_percent = 100;
+  char temp_text[16];
+  prv_format_sea_temp(temp_text, sizeof(temp_text), s_sea_temp);
+  snprintf(buffer, size, "Tide %d%% %s \xe2\x80\xa2 %s",
+    display_percent, s_rising ? "in" : "out", temp_text);
+}
+
+static void prv_glance_add(AppGlanceReloadSession *session, const char *text, time_t expires) {
   AppGlanceSlice slice = {
     .layout.icon = APP_GLANCE_SLICE_DEFAULT_ICON,
-    .layout.subtitle_template_string = buffer,
-    .expiration_time = APP_GLANCE_SLICE_NO_EXPIRATION,
+    .layout.subtitle_template_string = text,
+    .expiration_time = expires,
   };
   AppGlanceResult result = app_glance_add_slice(session, slice);
   if (result != APP_GLANCE_RESULT_SUCCESS) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "app_glance_add_slice() returned %d", result);
   }
+}
+
+// The glance only refreshes while the app runs, so precompute expiring slices
+// for the next few hours from the stored series; it then tracks the app even
+// with no phone. Identical consecutive texts merge into one slice.
+static void prv_glance_reload_callback(AppGlanceReloadSession *session, size_t limit,
+                                       void *context) {
+  const int16_t base_minutes = s_current_minutes;
+  const time_t now = time(NULL);
+  char pending[64] = "";
+  char text[64];
+  size_t added = 0;
+  int16_t end_k = 0;
+
+  // Keep room for the pending slice and the trailing "out of date" slice.
+  for (; end_k < GLANCE_HORIZON_STEPS && added + 2 < limit; end_k++) {
+    s_current_minutes = base_minutes + end_k * GLANCE_STEP_MINUTES;
+    prv_compute_state();
+    if (s_tide_count < 2 || prv_no_current_data()) break;
+    prv_glance_text(text, sizeof(text));
+    if (strcmp(text, pending) != 0) {
+      if (pending[0]) {
+        prv_glance_add(session, pending, now + end_k * GLANCE_STEP_MINUTES * 60);
+        added++;
+      }
+      strncpy(pending, text, sizeof(pending));
+    }
+  }
+  s_current_minutes = base_minutes;
+  prv_compute_state();
+
+  if (pending[0]) {
+    prv_glance_add(session, pending, now + end_k * GLANCE_STEP_MINUTES * 60);
+  }
+  // After the last computed slice (end of data or horizon) we know nothing.
+  prv_glance_add(session, "Tide info out of date", APP_GLANCE_SLICE_NO_EXPIRATION);
 }
 
 static void prv_update_glance(void) {
@@ -1072,6 +1111,16 @@ static void prv_persist_save(void) {
   persist_write_int(PERSIST_KEY_LAST_SYNC_EPOCH, (int32_t)s_last_sync_epoch);
 }
 
+// Advance "now" from the last sync by wall-clock time. Needed at load too:
+// a wakeup launch closes before the first tick, and with no phone there is no
+// sync to correct the glance.
+static void prv_extrapolate_now(void) {
+  if (s_last_sync_epoch <= 0) return;
+  time_t elapsed = time(NULL) - s_last_sync_epoch;
+  s_current_minutes = s_current_minutes_at_sync + (int16_t)(elapsed / 60);
+  s_is_stale = elapsed > STALE_THRESHOLD_SECONDS;
+}
+
 static void prv_persist_load(void) {
   if (!persist_exists(PERSIST_KEY_TIDE_VALUES)) return;
   persist_read_data(PERSIST_KEY_TIDE_VALUES, s_tide_values, sizeof(s_tide_values));
@@ -1081,7 +1130,7 @@ static void prv_persist_load(void) {
   s_sea_temp = (int16_t)persist_read_int(PERSIST_KEY_SEA_TEMP);
   s_current_minutes_at_sync = (int16_t)persist_read_int(PERSIST_KEY_CURRENT_MINUTES_AT_SYNC);
   s_last_sync_epoch = (time_t)persist_read_int(PERSIST_KEY_LAST_SYNC_EPOCH);
-  s_current_minutes = s_current_minutes_at_sync;
+  prv_extrapolate_now();
 }
 
 static void prv_reschedule_wakeup(void) {
@@ -1190,11 +1239,7 @@ static void prv_inbox_received(DictionaryIterator *iterator, void *context) {
 }
 
 static void prv_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
-  if (s_last_sync_epoch > 0) {
-    time_t elapsed = time(NULL) - s_last_sync_epoch;
-    s_current_minutes = s_current_minutes_at_sync + (int16_t)(elapsed / 60);
-    s_is_stale = elapsed > STALE_THRESHOLD_SECONDS;
-  }
+  prv_extrapolate_now();
   prv_compute_state();
   prv_set_text();
 }

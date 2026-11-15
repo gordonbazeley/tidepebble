@@ -57,7 +57,7 @@
 
 ## BigDataCloud for reverse geocoding
 
-**Chose:** `https://api.bigdatacloud.net/data/reverse-geocode-client` (no API key, browser-side).  
+**Chose:** `https://api-bdc.io/data/reverse-geocode-client` (no API key, browser-side; BigDataCloud's real host — the old api.bigdatacloud.net name now 404s, and the host is what the watch's connect prompt shows). Results are cached in localStorage per ~1km cell so routine refreshes make no geocode request.  
 **Why:** Free, no key, returns `city`/`locality`/`principalSubdivision` which compose a readable label.  
 **Trade-off:** Third-party dependency; label quality varies outside major cities.
 
